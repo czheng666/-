@@ -1,0 +1,10 @@
+{
+  "name": "临床采集 · OCR 归档",
+  "short_name": "临床采集",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f7f3",
+  "theme_color": "#0d8f7f",
+  "description": "纯客户端临床资料拍照与 OCR 归档工具"
+}

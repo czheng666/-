@@ -1,0 +1,23 @@
+.ocr-test-profile*/
+.export-test-profile/
+vendor/paddleocr-js-package/
+vendor/paddleocr-runtime/
+vendor/xlsx-package/
+vendor/xlsx-0.18.5.tgz
+models/*_tmp/
+.research-export-check.xlsx
+
+# Clinical records and exports must never enter the source repository.
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.pdf
+*.xlsx
+*.xls
+*.csv
+*.json
+*.zip
+
+# Only PP-OCRv6 small is referenced by the current browser app.
+models/PP-OCRv5_*.tar
