@@ -136,8 +136,8 @@
           <section class="appendicitis-capture" id="appendicitisCapture" aria-labelledby="appendicitisCaptureTitle">
             <div class="appendicitis-capture-head">
               <div>
-                <div class="number-summary-head"><span id="appendicitisCaptureTitle">阑尾炎病例现场采集</span><small id="appendicitisDraftStatus">填写即保存草稿</small></div>
-                <p class="collection-hint">OCR能识别的内容会先填入；症状、时间和术中所见可在拍照的同时直接补录，不用以后回头找。</p>
+                <div class="number-summary-head"><span id="appendicitisCaptureTitle">阑尾炎穿孔病例采集</span><small id="appendicitisDraftStatus">填写即保存草稿</small></div>
+                <p class="collection-hint">本项目仅纳入明确穿孔病例；先选择“明确穿孔”并填写判定依据，再归档。症状、时间和术中所见可在拍照时同步补录。</p>
               </div>
               <div class="collection-toggle-group"><label class="collection-toggle"><input id="appendicitisEnabled" type="checkbox" checked />启用</label><label class="collection-toggle"><input id="continueCaseAfterArchive" type="checkbox" checked />归档后继续此病例</label></div>
             </div>
@@ -227,7 +227,7 @@
             </div>
             <div class="review-gate">
               <label><input id="reviewConfirmed" type="checkbox" />我已核对姓名/编号、指标结果、单位和参考范围</label>
-              <small>只有完成人工复核后，才允许将这份资料归档为科研数据。</small>
+              <small>只有完成人工复核，并确认“明确穿孔”且填写判定依据后，才允许归档为本项目科研数据。</small>
             </div>
             <div class="editor-actions">
               <button class="button button-secondary" id="reRecognizeButton" type="button">重新识别</button>
@@ -316,6 +316,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=32"></script>
+    <script src="./app.js?v=33"></script>
   </body>
 </html>

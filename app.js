@@ -490,7 +490,7 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "研究分组由人工确认；下方影像、术中和病理证据仍分别保留，不以单一来源替代最终判断",
     alwaysOpen: true,
     fields: [
-      { key: "perforationStatus", label: "研究分组（穿孔状态）", type: "select", options: ["明确穿孔", "疑似穿孔", "未见穿孔", "待判定"] },
+      { key: "perforationStatus", label: "研究纳入判定（必须明确穿孔）", type: "select", options: ["明确穿孔", "疑似穿孔", "未见穿孔", "待判定"] },
       { key: "perforationLocation", label: "穿孔部位/范围", type: "text", placeholder: "如：阑尾尖端、体部、根部；未描述可留空" },
       { key: "perforationBasis", label: "穿孔判定依据摘要", type: "textarea", placeholder: "如：术中见阑尾体部穿孔伴脓液；CT示阑尾壁缺损" },
     ],
@@ -1806,6 +1806,32 @@ function getRecordNumbers(text) {
   return [...new Set(numbers.map((item) => item.trim()))].slice(0, 30);
 }
 
+function validatePerforationInclusion(data = getAppendicitisDataFromForm()) {
+  if (els.appendicitisEnabled?.checked === false) return { ok: false, message: "本项目仅收集明确穿孔病例，请先启用阑尾炎病例采集" };
+  if (String(data.perforationStatus || "").trim() !== "明确穿孔") return { ok: false, message: "本项目仅纳入明确穿孔病例，请在“穿孔判定（核心）”中选择“明确穿孔”" };
+  if (!String(data.perforationBasis || "").trim()) return { ok: false, message: "请填写穿孔判定依据摘要，说明来自影像、术中、病理或其他明确记录" };
+  return { ok: true };
+}
+
+function getPerforationInclusionStatus(data = {}) {
+  const status = String(data.perforationStatus || "").trim();
+  const basis = String(data.perforationBasis || "").trim();
+  if (status === "明确穿孔" && basis) return "纳入：明确穿孔";
+  if (status === "明确穿孔") return "明确穿孔（依据缺失）";
+  if (!status || status === "待判定") return "待判定";
+  return `不纳入：${status}`;
+}
+
+function focusPerforationCore() {
+  if (els.appendicitisEnabled) els.appendicitisEnabled.checked = true;
+  if (els.appendicitisCapture) els.appendicitisCapture.hidden = false;
+  const group = els.appendicitisForm?.querySelector('[data-appendicitis-group="perforationCore"]');
+  if (group) {
+    group.open = true;
+    group.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
 async function archiveCurrent() {
   const text = els.ocrText.value.trim();
   if (!state.images.length) { showToast("请先拍照或导入图片", "error"); return; }
@@ -1818,6 +1844,9 @@ async function archiveCurrent() {
   const personName = els.personName.value.trim();
   const personId = els.personId.value.trim();
   if (!personName && !personId) { showToast("请填写个人/患者姓名或病案/就诊号，资料才能按个人归档", "error"); els.personName.focus(); return; }
+  const appendicitisData = getAppendicitisDataFromForm();
+  const inclusion = validatePerforationInclusion(appendicitisData);
+  if (!inclusion.ok) { showToast(inclusion.message, "error"); focusPerforationCore(); return; }
   const now = new Date();
   const metrics = labFieldRules[els.recordType.value] ? getEditableMetricRows() : [];
   const summary = els.summaryText.value.trim() || buildSummary(text, els.recordType.value);
@@ -1837,7 +1866,7 @@ async function archiveCurrent() {
     metrics,
     numbers: getRecordNumbers(text),
     images: state.images.map((image) => image.dataUrl),
-    appendicitisData: els.appendicitisEnabled?.checked ? getAppendicitisDataFromForm() : {},
+    appendicitisData,
     reviewConfirmed: true,
     reviewStatus: "人工已复核",
     reviewedAt: now.getTime(),
@@ -2181,6 +2210,14 @@ function mergeAppendicitisData(target, next = {}) {
   return target;
 }
 
+function getPatientInclusionStatus(records = []) {
+  const statuses = records.map((record) => getPerforationInclusionStatus(record.appendicitisData));
+  if (statuses.includes("纳入：明确穿孔")) return "纳入：明确穿孔";
+  if (statuses.some((status) => status.startsWith("明确穿孔"))) return "明确穿孔（需补充依据）";
+  if (statuses.some((status) => status.startsWith("不纳入"))) return statuses.find((status) => status.startsWith("不纳入"));
+  return "待判定";
+}
+
 function buildResearchWorkbookRows() {
   const orderedRecords = state.records
     .slice()
@@ -2210,6 +2247,7 @@ function buildResearchWorkbookRows() {
       record.personId || "",
       reportDate,
       record.type || "",
+      getPerforationInclusionStatus(record.appendicitisData),
       record.title || "",
       record.createdAt ? new Date(Number(record.createdAt)) : "",
       record.ocrEngine || "",
@@ -2235,6 +2273,7 @@ function buildResearchWorkbookRows() {
         record.personId || "",
         reportDate,
         record.type || "",
+        getPerforationInclusionStatus(record.appendicitisData),
         variableCode,
         metric.name || "未命名指标",
         metric.abbreviation || "",
@@ -2282,6 +2321,7 @@ function buildResearchWorkbookRows() {
       dates[0] || "",
       dates[dates.length - 1] || "",
       types,
+      getPatientInclusionStatus(patient.records),
       "已归档",
        reviewPending ? (metricsCount ? `${metricsCount} 项指标待人工复核` : "文本资料待人工复核") : "资料已人工复核",
       "含直接身份信息；对外共享前请按研究方案去标识化",
@@ -2291,11 +2331,11 @@ function buildResearchWorkbookRows() {
   });
 
   return {
-    patientHeaders: ["病例ID", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
+    patientHeaders: ["病例ID", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "穿孔纳入状态", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
     patientRows,
-    recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
+    recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "穿孔纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
     recordRows,
-    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
+    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "穿孔纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
     metricRows,
     variableHeaders: ["变量编码", "资料类型", "指标名称", "英文缩写", "数据类型", "单位示例", "参考范围示例", "字段说明", "默认复核状态"],
     variableRows: [...variableMap.values()].sort((first, second) => String(first[0]).localeCompare(String(second[0]), "zh-CN")),
