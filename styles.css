@@ -203,6 +203,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .smart-badge { padding: 5px 6px; border-radius: 6px; color: var(--mint-dark); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 500; letter-spacing: .05em; background: var(--mint); }
 .person-detection { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; margin: -6px 0 15px; border: 1px solid rgba(255,142,111,.25); border-radius: 13px; background: rgba(255,230,220,.55); }
 .person-badge { color: #8c452e; background: #ffd9cc; }
+.patient-match-hint { display: block; margin-top: 6px; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
+.patient-match-hint[data-state="match"] { color: var(--mint-dark); }
+.patient-match-hint[data-state="warning"] { color: var(--coral-dark); font-weight: 700; }
 
 .archive-card { grid-column: 1 / -1; }
 .archive-heading { align-items: center; }

@@ -38,6 +38,7 @@ const els = {
   recordType: $("recordType"),
   personName: $("personName"),
   personId: $("personId"),
+  patientMatchHint: $("patientMatchHint"),
   recordNote: $("recordNote"),
   appendicitisCapture: $("appendicitisCapture"),
   appendicitisEnabled: $("appendicitisEnabled"),
@@ -341,6 +342,7 @@ function normalizeRecord(record) {
     ...record,
     personName: record.personName || "",
     personId: record.personId || "",
+    patientKey: record.patientKey || "",
     summary: record.summary || "",
     ocrEdited: Boolean(record.ocrEdited),
     ocrOriginalText: record.ocrOriginalText || record.text || "",
@@ -1722,6 +1724,7 @@ function resetCapture({ preserveCase = false } = {}) {
     applyAppendicitisData(preservedCase.appendicitisData);
     saveCaptureDraft();
   }
+  updatePatientMatchHint();
 }
 
 async function recognizeImages() {
@@ -1819,7 +1822,7 @@ function getPerforationInclusionStatus(data = {}) {
   if (status === "明确穿孔" && basis) return "纳入：明确穿孔";
   if (status === "明确穿孔") return "明确穿孔（依据缺失）";
   if (!status || status === "待判定") return "待判定";
-  return `不纳入：${status}`;
+  return "不纳入：" + status;
 }
 
 function focusPerforationCore() {
@@ -1844,9 +1847,20 @@ async function archiveCurrent() {
   const personName = els.personName.value.trim();
   const personId = els.personId.value.trim();
   if (!personName && !personId) { showToast("请填写个人/患者姓名或病案/就诊号，资料才能按个人归档", "error"); els.personName.focus(); return; }
+  const identityIssue = getPatientIdentityIssue(personName, personId);
+  if (identityIssue) {
+    showToast(identityIssue, "error");
+    els.personId.focus();
+    updatePatientMatchHint();
+    return;
+  }
   const appendicitisData = getAppendicitisDataFromForm();
   const inclusion = validatePerforationInclusion(appendicitisData);
-  if (!inclusion.ok) { showToast(inclusion.message, "error"); focusPerforationCore(); return; }
+  if (!inclusion.ok) {
+    showToast(inclusion.message, "error");
+    focusPerforationCore();
+    return;
+  }
   const now = new Date();
   const metrics = labFieldRules[els.recordType.value] ? getEditableMetricRows() : [];
   const summary = els.summaryText.value.trim() || buildSummary(text, els.recordType.value);
@@ -1854,6 +1868,7 @@ async function archiveCurrent() {
     id: makeId(),
     personName,
     personId,
+    patientKey: resolvePatientKey(personName, personId),
     title: els.recordTitle.value.trim() || `${els.recordType.value} · ${now.toLocaleDateString("zh-CN")}`,
     type: els.recordType.value,
     note: els.recordNote.value.trim(),
@@ -1890,12 +1905,118 @@ function formatDate(timestamp) {
   return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp));
 }
 
+function normalizeIdentityToken(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\s\u3000]/g, "")
+    .replace(/[·•．。]/g, "")
+    .replace(/[—–\-_/:：]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function getPatientIdentityMatches(personName = "", personId = "", records = state.records) {
+  const nameToken = normalizeIdentityToken(personName);
+  const idToken = normalizeIdentityToken(personId);
+  const source = Array.isArray(records) ? records : [];
+  const idMatches = idToken
+    ? source.filter((record) => normalizeIdentityToken(record.personId) === idToken)
+    : [];
+  const nameMatches = nameToken
+    ? source.filter((record) => normalizeIdentityToken(record.personName) === nameToken)
+    : [];
+  const uniqueIds = [...new Set(nameMatches.map((record) => normalizeIdentityToken(record.personId)).filter(Boolean))];
+  return { nameToken, idToken, idMatches, nameMatches, uniqueIds };
+}
+
+function getCanonicalPatientKey(record, records = state.records) {
+  const matches = getPatientIdentityMatches(record?.personName, record?.personId, records);
+  if (matches.idToken) return `id:${matches.idToken}`;
+  if (matches.uniqueIds.length === 1) return `id:${matches.uniqueIds[0]}`;
+  if (matches.nameToken) return `name:${matches.nameToken}`;
+  return "unassigned";
+}
+
+function resolvePatientKey(personName = "", personId = "", records = state.records) {
+  return getCanonicalPatientKey({ personName, personId }, records);
+}
+
+function getPatientIdentityIssue(personName = "", personId = "", records = state.records) {
+  const matches = getPatientIdentityMatches(personName, personId, records);
+  if (!matches.idToken && matches.nameToken && matches.uniqueIds.length > 1) {
+    return "发现同名但对应多个病案/住院号，请补填并核对编号后再归档，系统不会自动合并。";
+  }
+  return "";
+}
+
+function ensurePatientMatchHint() {
+  if (els.patientMatchHint) return els.patientMatchHint;
+  const field = els.personId?.closest(".field");
+  if (!field) return null;
+  const hint = document.createElement("small");
+  hint.id = "patientMatchHint";
+  hint.className = "patient-match-hint";
+  hint.hidden = true;
+  field.appendChild(hint);
+  els.patientMatchHint = hint;
+  return hint;
+}
+
+function updatePatientMatchHint() {
+  const hint = ensurePatientMatchHint();
+  if (!hint) return;
+  const personName = els.personName?.value.trim() || "";
+  const personId = els.personId?.value.trim() || "";
+  if (!personName && !personId) {
+    hint.hidden = true;
+    hint.textContent = "";
+    return;
+  }
+  const matches = getPatientIdentityMatches(personName, personId);
+  hint.hidden = false;
+  hint.dataset.state = "new";
+  if (matches.idMatches.length) {
+    const matched = matches.idMatches.find((record) => record.personName) || matches.idMatches[0];
+    hint.dataset.state = "match";
+    hint.textContent = `编号已匹配已有个人：${matched.personName || "未命名"}；本份资料将归入同一档案`;
+    return;
+  }
+  if (!matches.idToken && matches.uniqueIds.length === 1) {
+    const matched = matches.nameMatches.find((record) => record.personId) || matches.nameMatches[0];
+    hint.dataset.state = "match";
+    hint.textContent = `按姓名匹配到已有个人：${matched.personName || personName}；建议补填病案/住院号确认`;
+    return;
+  }
+  if (!matches.idToken && matches.uniqueIds.length > 1) {
+    hint.dataset.state = "warning";
+    hint.textContent = "发现同名不同编号，请补填并核对病案/住院号，系统不会自动合并";
+    return;
+  }
+  if (matches.idToken) {
+    hint.textContent = "未匹配到此编号；归档时将建立新的个人档案，请核对编号是否完整";
+    return;
+  }
+  hint.textContent = "未匹配到已有个人；归档时将建立新的个人档案";
+}
+
 function personKey(record) {
+  return getCanonicalPatientKey(record);
+}
+
+function legacyPersonKey(record) {
   return (record.personId ? `id:${record.personId}` : record.personName ? `name:${record.personName}` : "unassigned").trim().toLowerCase();
 }
 
 function personLabel(record) {
   return record.personName || record.personId || "未指定个人";
+}
+
+function getPatientRepresentative(records = []) {
+  return records.find((record) => record.personName && record.personId)
+    || records.find((record) => record.personName)
+    || records.find((record) => record.personId)
+    || records[0]
+    || {};
 }
 
 function personMeta(record) {
@@ -1910,7 +2031,11 @@ function renderPersonFilter() {
   const people = new Map();
   state.records.forEach((record) => {
     const key = personKey(record);
-    if (!people.has(key)) people.set(key, { label: personLabel(record), meta: personMeta(record) });
+    const currentPerson = people.get(key);
+    const shouldReplace = !currentPerson
+      || (!currentPerson.record.personName && record.personName)
+      || (!currentPerson.record.personId && record.personId);
+    if (shouldReplace) people.set(key, { label: personLabel(record), meta: personMeta(record), record });
   });
   els.personFilterSelect.innerHTML = `<option value="全部">全部个人</option>${[...people.entries()].map(([key, person]) => `<option value="${escapeHtml(key)}">${escapeHtml(person.label)}${person.meta && person.meta !== "未填写病案/就诊号" ? ` · ${escapeHtml(person.meta)}` : ""}</option>`).join("")}`;
   els.personFilterSelect.value = people.has(current) ? current : "全部";
@@ -1968,7 +2093,7 @@ function getPatientOverviewRows(records) {
     const lastDate = dates[dates.length - 1]?.label || firstDate;
     return {
       key: group.key,
-      label: personLabel(group.person),
+      label: personLabel(getPatientRepresentative(group.records)),
       personId: group.records.find((record) => record.personId)?.personId || "",
       count: group.records.length,
       types: typeLabels.join("、") || "未分类",
@@ -2022,6 +2147,7 @@ function renderRecords() {
     if (!groups.has(key)) groups.set(key, { person: record, records: [] });
     groups.get(key).records.push(record);
   });
+  groups.forEach((group) => { group.person = getPatientRepresentative(group.records); });
   els.recordList.innerHTML = [...groups.values()].map((group) => `
     <section class="person-group">
       <div class="person-group-heading"><span class="person-avatar">${escapeHtml(personLabel(group.person).slice(0, 1))}</span><div><strong>${escapeHtml(personLabel(group.person))}</strong><small>${escapeHtml(personMeta(group.person))} · ${group.records.length} 份资料</small></div></div>
@@ -2043,6 +2169,7 @@ function renderRecords() {
     els.archiveEmpty.querySelector("strong").textContent = "本机档案还是空的";
     els.archiveEmpty.querySelector("span").textContent = "完成一次 OCR 校对后，资料会出现在这里";
   }
+  updatePatientMatchHint();
 }
 
 function renderSavedMetrics(metrics = []) {
@@ -2515,6 +2642,7 @@ els.applyDetectedPersonButton.addEventListener("click", () => {
   if (!state.detectedPersonName && !state.detectedPersonId) return;
   if (!els.personName.value.trim() && state.detectedPersonName) els.personName.value = state.detectedPersonName;
   if (!els.personId.value.trim() && state.detectedPersonId) els.personId.value = state.detectedPersonId;
+  updatePatientMatchHint();
   showToast("已应用个人信息，归档时将归入该个人");
 });
 els.recordType.addEventListener("change", () => {
@@ -2564,7 +2692,11 @@ els.appendicitisEnabled.addEventListener("change", () => {
 });
 els.continueCaseAfterArchive.addEventListener("change", scheduleCaptureDraftSave);
 [els.personName, els.personId, els.recordTitle, els.recordNote].forEach((input) => input.addEventListener("input", scheduleCaptureDraftSave));
+els.personName.addEventListener("input", updatePatientMatchHint);
+els.personId.addEventListener("input", updatePatientMatchHint);
 restoreCaptureDraft();
+ensurePatientMatchHint();
+updatePatientMatchHint();
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").then((registration) => registration.update()).catch(() => {});
 loadRecords();
