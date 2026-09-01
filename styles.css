@@ -220,14 +220,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .overview-stats strong { margin-right: 3px; color: var(--ink); font-family: "DM Mono", monospace; font-size: 12px; }
 .overview-stats .overview-stat-warning strong { color: var(--coral-dark); }
 .overview-table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.74); }
-.overview-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 10px; }
+.overview-table { width: 100%; min-width: 880px; border-collapse: collapse; font-size: 10px; }
 .overview-table th, .overview-table td { padding: 9px 9px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 .overview-table th { color: var(--ink-soft); font-size: 9px; font-weight: 800; background: var(--paper-deep); }
 .overview-table td { color: var(--ink); line-height: 1.45; }
 .overview-table td:first-child { min-width: 120px; }
 .overview-table td:first-child strong, .overview-table td:first-child small { display: block; }
 .overview-table td:first-child small { margin-top: 3px; color: var(--ink-soft); font-size: 9px; }
-.overview-table td:nth-child(5) { min-width: 180px; max-width: 290px; }
+.overview-table td:nth-child(5), .overview-table td:nth-child(6) { min-width: 155px; max-width: 290px; }
 .overview-table tr:last-child td { border-bottom: 0; }
 .overview-issue { color: var(--coral-dark) !important; font-weight: 700; }
 .overview-ok { color: var(--mint-dark) !important; }

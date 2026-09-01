@@ -297,10 +297,20 @@ function applyAutoAppendicitisFields(text, type) {
   });
 
   const findingMappings = [
-    ["imagingAppendicolith", ["粪石", "阑尾结石"]], ["fatStranding", ["脂肪浸润", "脂肪间隙浑浊"]],
-    ["periAppendicealFluid", ["阑尾周围积液", "周围积液"]], ["imagingAbscess", ["脓肿", "脓腔"]],
-    ["imagingPhlegmon", ["炎性包块", "包块"]], ["freeGas", ["游离气体", "游离气"]],
-    ["imagingPerforation", ["穿孔", "破裂"]],
+    ...(type === "CT" || type === "彩超" ? [
+      ["imagingAppendicolith", ["粪石", "阑尾结石"]], ["fatStranding", ["脂肪浸润", "脂肪间隙浑浊"]],
+      ["periAppendicealFluid", ["阑尾周围积液", "周围积液"]], ["imagingAbscess", ["脓肿", "脓腔"]],
+      ["imagingPhlegmon", ["炎性包块", "包块"]], ["freeGas", ["游离气体", "游离气"]],
+      ["imagingPerforation", ["穿孔", "破裂", "壁缺损"]],
+    ] : []),
+    ...(type === "手术记录" ? [
+      ["operativeAppendicolith", ["粪石", "阑尾结石"]], ["operativePurulentExudate", ["脓液", "脓性渗出", "脓性分泌物"]],
+      ["operativeAbscess", ["脓肿", "脓腔"]], ["operativePhlegmon", ["炎性包块", "包块"]],
+      ["operativePerforation", ["穿孔", "破裂", "破口", "壁缺损"]], ["drainagePlaced", ["腹腔引流", "放置引流", "引流管"]],
+    ] : []),
+    ...(type === "病理报告" ? [
+      ["pathologyPerforation", ["穿孔", "破裂", "壁缺损"]], ["pathologyAppendicolith", ["粪石", "阑尾结石"]],
+    ] : []),
   ];
   findingMappings.forEach(([key, terms]) => {
     const stateValue = extractFindingState(text, terms);
@@ -475,6 +485,17 @@ const APPENDICITIS_FIELD_GROUPS = [
     ],
   },
   {
+    key: "perforationCore",
+    title: "穿孔判定（核心）",
+    hint: "研究分组由人工确认；下方影像、术中和病理证据仍分别保留，不以单一来源替代最终判断",
+    alwaysOpen: true,
+    fields: [
+      { key: "perforationStatus", label: "研究分组（穿孔状态）", type: "select", options: ["明确穿孔", "疑似穿孔", "未见穿孔", "待判定"] },
+      { key: "perforationLocation", label: "穿孔部位/范围", type: "text", placeholder: "如：阑尾尖端、体部、根部；未描述可留空" },
+      { key: "perforationBasis", label: "穿孔判定依据摘要", type: "textarea", placeholder: "如：术中见阑尾体部穿孔伴脓液；CT示阑尾壁缺损" },
+    ],
+  },
+  {
     key: "labs",
     title: "首次化验",
     hint: "OCR自动填入；手工改动会保留，优先填写治疗前结果",
@@ -522,6 +543,8 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "treatmentStrategy", label: "治疗策略", type: "select", options: ["直接手术", "抗菌药物/保守治疗", "介入引流后手术", "其他", "未记录"] },
       { key: "surgeryMethod", label: "手术方式", type: "select", options: ["腹腔镜", "开放", "中转开放", "未手术", "未记录"] },
       { key: "operationDurationMin", label: "手术时间（分钟）", type: "number", step: "1" },
+      { key: "drainagePlaced", label: "腹腔引流", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "drainageDurationDays", label: "引流留置时间（天）", type: "number", step: "0.1" },
       { key: "antibioticDurationDays", label: "抗生素总疗程（天）", type: "number", step: "0.1" },
     ],
   },
@@ -536,6 +559,7 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "gangrene", label: "坏疽", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operativePerforation", label: "术中穿孔", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operativeAppendicolith", label: "术中粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "operativePurulentExudate", label: "术中脓性渗出/脓液", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operativeAbscess", label: "术中脓肿/脓腔", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operativePhlegmon", label: "术中炎性包块", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operativePeritonitis", label: "术中腹膜炎范围", type: "select", options: ["无", "局限性", "弥漫性", "未描述", "不确定"] },
@@ -1021,12 +1045,43 @@ function isMetricForReview(row) {
   return Boolean(String(row.flag || "").trim()) || (String(row.confidence ?? "").trim() !== "" && Number.isFinite(confidence) && confidence < 0.75);
 }
 
+function getCurrentAppendicitisData() {
+  if (els.appendicitisEnabled?.checked === false) return {};
+  return { ...(state.appendicitisData || {}), ...getAppendicitisDataFromForm() };
+}
+
+function buildAppendicitisResearchSummary(data = getCurrentAppendicitisData()) {
+  const filledFields = APPENDICITIS_FIELD_DEFS.filter((field) => isAppendicitisValueFilled(data[field.key]));
+  if (!filledFields.length) return "";
+  const evidenceFields = [
+    ["研究分组", data.perforationStatus],
+    ["影像", data.imagingPerforation],
+    ["术中", data.operativePerforation],
+    ["病理", data.pathologyPerforation],
+  ].filter(([, value]) => isAppendicitisValueFilled(value));
+  const evidence = evidenceFields.length
+    ? evidenceFields.map(([source, value]) => `${source}：${value}`).join("；")
+    : "未补录";
+  const sections = APPENDICITIS_FIELD_GROUPS.map((group) => {
+    const rows = group.fields.filter((field) => isAppendicitisValueFilled(data[field.key]));
+    if (!rows.length) return "";
+    return `${group.title}\n${rows.map((field) => `${field.label}：${data[field.key]}`).join("；")}`;
+  }).filter(Boolean);
+  return `阑尾炎穿孔科研摘要\n穿孔核心证据（按记录来源）：${evidence}\n\n${sections.join("\n\n")}\n\n提示：穿孔证据按影像、术中和病理来源分别保留，不对未描述内容作“无”的推断。`;
+}
+
+function appendAppendicitisResearchSummary(baseSummary, mode = state.summaryMode) {
+  if (mode !== "research") return baseSummary;
+  const clinicalSummary = buildAppendicitisResearchSummary();
+  return clinicalSummary ? `${clinicalSummary}\n\n${baseSummary}` : baseSummary;
+}
+
 function buildSummaryByMode(text, type, mode = state.summaryMode) {
   const source = String(text || "").trim();
   if (!source) return "";
   if (labFieldRules[type]) {
     const metrics = getCurrentSummaryMetrics(source, type);
-    if (!metrics.length) return buildSummary(source, type);
+    if (!metrics.length) return appendAppendicitisResearchSummary(buildSummary(source, type), mode);
     const flagged = metrics.filter(isMetricForReview);
     const reportDate = typeof getReportDate === "function" ? getReportDate(source) : "";
     const identity = [els.personName?.value.trim(), els.personId?.value.trim()].filter(Boolean).join(" · ");
@@ -1039,14 +1094,14 @@ function buildSummaryByMode(text, type, mode = state.summaryMode) {
     }
     if (mode === "research") {
       const flaggedLines = flagged.length ? flagged.map(formatSummaryMetric).join("\n") : "未识别到异常标记";
-      return `${type}（科研摘要）\n${contextLine}\n\n异常/待复核指标：\n${flaggedLines}\n\n全部指标明细：\n${metrics.map(formatSummaryMetric).join("\n")}\n\n提示：摘要仅用于临床资料整理，不代表诊断意见；归档前请完成逐项人工复核。`;
+      return appendAppendicitisResearchSummary(`${type}（科研摘要）\n${contextLine}\n\n异常/待复核指标：\n${flaggedLines}\n\n全部指标明细：\n${metrics.map(formatSummaryMetric).join("\n")}\n\n提示：摘要仅用于临床资料整理，不代表诊断意见；归档前请完成逐项人工复核。`, mode);
     }
   }
   if (mode === "raw") {
     const lines = getTextLines(source).filter((line) => line.trim() && !isLabFooter(line)).slice(0, 18);
     return `${type}（原文重点）\n${lines.join("\n")}\n\n提示：请根据原图补充或修订检查部位、所见和印象/结论。`;
   }
-  return buildSummary(source, type);
+  return appendAppendicitisResearchSummary(buildSummary(source, type), mode);
 }
 
 function updateSummaryMeta() {
@@ -1852,6 +1907,18 @@ function formatOverviewDate(record) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
+function getPerforationEvidence(records) {
+  const sources = [["研究分组", "perforationStatus"], ["影像", "imagingPerforation"], ["术中", "operativePerforation"], ["病理", "pathologyPerforation"]];
+  const states = sources.map(([label, key]) => {
+    const values = records.map((record) => String(record.appendicitisData?.[key] || "").trim()).filter(isAppendicitisValueFilled);
+    if (!values.length) return "";
+    const value = values.includes("明确穿孔") ? "明确穿孔" : values.includes("有") ? "有" : values.includes("疑似穿孔") ? "疑似穿孔" : values.includes("不确定") ? "不确定" : values.includes("未见穿孔") ? "未见穿孔" : values.includes("无") ? "无" : values[values.length - 1];
+    return `${label}：${value}`;
+  }).filter(Boolean);
+  const hasConcern = states.some((item) => item.endsWith("：有") || item.endsWith("：不确定") || item.endsWith("：明确穿孔") || item.endsWith("：疑似穿孔"));
+  return { label: states.join("；") || "未补录", hasConcern };
+}
+
 function getPatientOverviewRows(records) {
   const groups = new Map();
   records.forEach((record) => {
@@ -1867,6 +1934,7 @@ function getPatientOverviewRows(records) {
     const issueLabels = [...new Set(metrics.map((metric) => `${metric.abbreviation || metric.name || "指标"} ${metric.value || ""}${metric.flag ? ` ${metric.flag}` : ""}`.trim()).filter(Boolean))];
     const hasPendingReview = group.records.some((record) => record.reviewStatus !== "人工已复核");
     const typeLabels = [...new Set(group.records.map((record) => record.type).filter(Boolean))];
+    const perforation = getPerforationEvidence(group.records);
     const firstDate = dates[0]?.label || "未识别";
     const lastDate = dates[dates.length - 1]?.label || firstDate;
     return {
@@ -1876,6 +1944,8 @@ function getPatientOverviewRows(records) {
       count: group.records.length,
       types: typeLabels.join("、") || "未分类",
       dateRange: firstDate === lastDate ? firstDate : `${firstDate} 至 ${lastDate}`,
+      perforation: perforation.label,
+      perforationConcern: perforation.hasConcern,
       issues: issueLabels,
       hasPendingReview,
     };
@@ -1887,17 +1957,19 @@ function renderArchiveOverview(records) {
   const rows = getPatientOverviewRows(records);
   const metricCount = records.reduce((total, record) => total + getResearchMetrics(record).length, 0);
   const issueCount = rows.reduce((total, row) => total + row.issues.length, 0);
+  const perforationCount = rows.filter((row) => row.perforationConcern).length;
   const pendingCount = records.filter((record) => record.reviewStatus !== "人工已复核").length;
   els.overviewStats.innerHTML = [
     `<span><strong>${rows.length}</strong> 名个人/病例</span>`,
     `<span><strong>${records.length}</strong> 份资料</span>`,
     `<span><strong>${metricCount}</strong> 项指标</span>`,
+    `<span class="overview-stat-warning"><strong>${perforationCount}</strong> 个病例有/疑似穿孔证据</span>`,
     `<span class="overview-stat-warning"><strong>${issueCount}</strong> 项异常/待复核</span>`,
     pendingCount ? `<span class="overview-stat-warning"><strong>${pendingCount}</strong> 份未完成复核</span>` : "",
   ].filter(Boolean).join("");
   els.overviewBody.innerHTML = rows.map((row) => {
     const issues = row.issues.length ? `${row.issues.slice(0, 3).map(escapeHtml).join("；")}${row.issues.length > 3 ? ` 等 ${row.issues.length} 项` : ""}` : (row.hasPendingReview ? "待完成人工复核" : "未发现异常标记");
-    return `<tr><td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.personId || "未填写病案/就诊号")}</small></td><td>${row.count} 份</td><td>${escapeHtml(row.types)}</td><td>${escapeHtml(row.dateRange)}</td><td class="${row.issues.length || row.hasPendingReview ? "overview-issue" : "overview-ok"}">${issues}</td><td><button class="button button-ghost overview-person-button" type="button" data-overview-person="${escapeHtml(row.key)}">查看此人</button></td></tr>`;
+    return `<tr><td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.personId || "未填写病案/就诊号")}</small></td><td>${row.count} 份</td><td>${escapeHtml(row.types)}</td><td>${escapeHtml(row.dateRange)}</td><td class="${row.perforationConcern ? "overview-issue" : "overview-ok"}">${escapeHtml(row.perforation)}</td><td class="${row.issues.length || row.hasPendingReview ? "overview-issue" : "overview-ok"}">${issues}</td><td><button class="button button-ghost overview-person-button" type="button" data-overview-person="${escapeHtml(row.key)}">查看此人</button></td></tr>`;
   }).join("");
   els.overviewEmpty.hidden = rows.length > 0;
   els.overviewBody.parentElement.parentElement.hidden = rows.length === 0;
@@ -1906,8 +1978,8 @@ function renderArchiveOverview(records) {
 function buildOverviewText(records) {
   const rows = getPatientOverviewRows(records);
   if (!rows.length) return "";
-  const header = ["个人/病例", "病案/就诊号", "资料数", "资料类型", "报告时间", "异常/待复核"].join("\t");
-  const body = rows.map((row) => [row.label, row.personId, row.count, row.types, row.dateRange, row.issues.join("；") || (row.hasPendingReview ? "待复核" : "未发现异常标记")].join("\t"));
+  const header = ["个人/病例", "病案/就诊号", "资料数", "资料类型", "报告时间", "穿孔证据", "异常/待复核"].join("\t");
+  const body = rows.map((row) => [row.label, row.personId, row.count, row.types, row.dateRange, row.perforation, row.issues.join("；") || (row.hasPendingReview ? "待复核" : "未发现异常标记")].join("\t"));
   return [header, ...body].join("\n");
 }
 
@@ -2381,8 +2453,8 @@ els.metricTableBody.addEventListener("input", (event) => {
   }
 });
 els.ocrText.addEventListener("input", () => { state.ocrText = els.ocrText.value; state.ocrEdited = state.ocrText !== state.ocrOriginalText; if (els.reviewConfirmed) els.reviewConfirmed.checked = false; updateSmartResult(state.ocrText, true); updatePersonDetection(state.ocrText, true); renderNumbers(state.ocrText); });
-els.personName.addEventListener("input", () => { if (els.personName.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; });
-els.personId.addEventListener("input", () => { if (els.personId.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; });
+els.personName.addEventListener("input", () => { if (els.personName.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
+els.personId.addEventListener("input", () => { if (els.personId.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
 els.summaryText.addEventListener("input", () => { state.summaryManuallyEdited = true; updateSummaryMeta(); });
 els.summaryMode.addEventListener("change", () => {
   state.summaryMode = els.summaryMode.value;
@@ -2444,7 +2516,7 @@ els.deleteRecordButton.addEventListener("click", deleteCurrentRecord);
 window.addEventListener("beforeunload", stopCamera);
 
 renderAppendicitisForm();
-els.appendicitisForm.addEventListener("input", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); });
+els.appendicitisForm.addEventListener("input", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
 els.appendicitisForm.addEventListener("change", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); });
 els.appendicitisEnabled.addEventListener("change", () => {
   els.appendicitisCapture.hidden = !els.appendicitisEnabled.checked;
