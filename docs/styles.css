@@ -119,6 +119,9 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .appendicitis-group summary small { margin-left: auto; color: var(--ink-soft); font: 10px "DM Mono", monospace; }
 .appendicitis-group > p { margin: 7px 0 10px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .appendicitis-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-top: 2px; }
+.appendicitis-advanced { margin-top: 10px; padding-top: 9px; border-top: 1px dashed rgba(216,228,222,.9); }
+.appendicitis-advanced-toggle { min-height: 30px; padding: 6px 10px; font-size: 10px; }
+.appendicitis-advanced-panel { margin-top: 9px; }
 .appendicitis-field textarea { min-height: 58px; }
 .saved-appendicitis { margin: 14px 0; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #fbfdfb; }
 .saved-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

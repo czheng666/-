@@ -133,15 +133,20 @@ const APPENDICITIS_MISSING_VALUES = new Set(["", "未填写", "未记录", "未�
 function renderAppendicitisForm() {
   if (!els.appendicitisForm) return;
   els.appendicitisForm.innerHTML = APPENDICITIS_FIELD_GROUPS.map((group) => {
-    const fields = group.fields.map((field) => {
+    const renderField = (field) => {
       const control = field.type === "select"
         ? `<select data-appendicitis-field="${field.key}" data-default-value="${escapeHtml(field.defaultValue || "")}"><option value="">未填写</option>${field.options.map((option) => `<option value="${escapeHtml(option)}"${field.defaultValue === option ? " selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select>`
         : field.type === "textarea"
           ? `<textarea data-appendicitis-field="${field.key}" rows="2" placeholder="${escapeHtml(field.placeholder || "")}"></textarea>`
           : `<input data-appendicitis-field="${field.key}" type="${field.type}"${field.step ? ` step="${field.step}"` : ""}${field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : ""} />`;
       return `<label class="field appendicitis-field"><span>${escapeHtml(field.label)}</span>${control}</label>`;
-    }).join("");
-    return `<details class="appendicitis-group" data-appendicitis-group="${group.key}"${group.alwaysOpen ? " open" : ""}><summary><span>${escapeHtml(group.title)}</span><small data-group-count="${group.key}">0/${group.fields.length}</small></summary><p>${escapeHtml(group.hint)}</p><div class="appendicitis-fields">${fields}</div></details>`;
+    };
+    const fields = group.fields.filter((field) => !field.advanced).map(renderField).join("");
+    const advancedFields = group.fields.filter((field) => field.advanced).map(renderField).join("");
+    const advancedSection = advancedFields
+      ? `<div class="appendicitis-advanced"><button class="button ghost appendicitis-advanced-toggle" type="button" data-toggle-appendicitis-advanced="${group.key}">展开复核/溯源信息</button><div class="appendicitis-advanced-panel" data-appendicitis-advanced-panel="${group.key}" hidden><div class="appendicitis-fields">${advancedFields}</div></div></div>`
+      : "";
+    return `<details class="appendicitis-group" data-appendicitis-group="${group.key}"${group.alwaysOpen ? " open" : ""}><summary><span>${escapeHtml(group.title)}</span><small data-group-count="${group.key}">0/${group.fields.length}</small></summary><p>${escapeHtml(group.hint)}</p><div class="appendicitis-fields">${fields}</div>${advancedSection}</details>`;
   }).join("");
   updateAppendicitisFormContext();
 }
@@ -162,6 +167,13 @@ function applyAppendicitisData(data = {}) {
     input.value = Object.prototype.hasOwnProperty.call(normalized, key)
       ? (normalized[key] || "")
       : (input.dataset.defaultValue || "");
+  });
+  els.appendicitisForm?.querySelectorAll("[data-appendicitis-advanced-panel]").forEach((panel) => {
+    const group = APPENDICITIS_FIELD_GROUPS.find((candidate) => candidate.key === panel.dataset.appendicitisAdvancedPanel);
+    const hasAdvancedValue = group?.fields.filter((field) => field.advanced).some((field) => isAppendicitisValueFilled(normalized[field.key]));
+    panel.hidden = !hasAdvancedValue;
+    const toggle = els.appendicitisForm.querySelector(`[data-toggle-appendicitis-advanced="${panel.dataset.appendicitisAdvancedPanel}"]`);
+    if (toggle) toggle.textContent = hasAdvancedValue ? "收起复核/溯源信息" : "展开复核/溯源信息";
   });
   updateAppendicitisProgress();
 }
@@ -797,8 +809,8 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "contamination_type", label: "腹腔污染性质", type: "select", options: ["无", "清亮", "脓性", "粪性", "混合", "未检查", "未记录", "未描述", "不确定"] },
       { key: "perforation_type", label: "穿孔类型", type: "select", options: ["无", "局限/包裹性", "游离性", "未描述", "不确定"] },
       { key: "free_appendicolith", label: "游离粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
-      { key: "final_wses_grade", label: "最终WSES分级（术中结局）", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "grade_source", label: "WSES分级依据来源", type: "select", options: ["手术记录", "腹腔镜视频/照片", "CT报告", "病理报告", "多来源复核", "其他", "未记录"] },
+      { key: "final_wses_grade", label: "最终WSES分级（术中结局）", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
+      { key: "grade_source", label: "WSES分级依据来源", type: "select", options: ["手术记录", "腹腔镜视频/照片", "CT报告", "病理报告", "多来源复核", "其他", "未记录"], advanced: true },
       { key: "simpleInflammation", label: "充血/单纯炎症", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "suppuration", label: "化脓", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "gangrene", label: "坏疽", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
@@ -813,16 +825,16 @@ const APPENDICITIS_FIELD_GROUPS = [
     types: ["手术记录", "CT", "彩超", "住院病历", "出院小结"],
     fields: [
       { key: "suggested_wses_grade", label: "机器WSES分级建议（无视频/照片时依据术中记录）", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "machine_grade_basis", label: "机器分级输入来源", type: "select", options: ["术中记录OCR", "手工录入术中字段", "术中记录OCR+手工修订", "未记录"] },
-      { key: "operative_report_available", label: "手术记录是否可获取", type: "select", options: ["有", "无", "部分/不完整", "未核实"] },
-      { key: "operative_media_available", label: "腹腔镜视频/照片是否可获取（默认无）", type: "select", options: ["有", "无", "未核实", "不适用"], defaultValue: "无" },
-      { key: "unknown_reason", label: "Unknown原因", type: "textarea", placeholder: "如：只写腹膜炎，未说明局限/弥漫；缺少手术记录；脓肿大小未报告" },
-      { key: "reviewer_1_grade", label: "复核者1分级", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "reviewer_2_grade", label: "复核者2分级", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "final_adjudicated_grade", label: "最终仲裁分级", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "reviewer_1_comment", label: "复核者1意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
-      { key: "reviewer_2_comment", label: "复核者2意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
-      { key: "label_adjudication_status", label: "标签复核状态", type: "select", options: ["机器建议待确认", "无需复核", "待双人复核", "已完成复核", "无法判定"] },
+      { key: "machine_grade_basis", label: "机器分级输入来源", type: "select", options: ["术中记录OCR", "手工录入术中字段", "术中记录OCR+手工修订", "未记录"], advanced: true },
+      { key: "operative_report_available", label: "手术记录是否可获取", type: "select", options: ["有", "无", "部分/不完整", "未核实"], advanced: true },
+      { key: "operative_media_available", label: "腹腔镜视频/照片是否可获取（默认无）", type: "select", options: ["有", "无", "未核实", "不适用"], defaultValue: "无", advanced: true },
+      { key: "unknown_reason", label: "Unknown原因", type: "textarea", placeholder: "如：只写腹膜炎，未说明局限/弥漫；缺少手术记录；脓肿大小未报告", advanced: true },
+      { key: "reviewer_1_grade", label: "复核者1分级", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
+      { key: "reviewer_2_grade", label: "复核者2分级", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
+      { key: "final_adjudicated_grade", label: "最终仲裁分级", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
+      { key: "reviewer_1_comment", label: "复核者1意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异", advanced: true },
+      { key: "reviewer_2_comment", label: "复核者2意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异", advanced: true },
+      { key: "label_adjudication_status", label: "标签复核状态", type: "select", options: ["机器建议待确认", "无需复核", "待双人复核", "已完成复核", "无法判定"], advanced: true },
     ],
   },
   {
@@ -3092,6 +3104,15 @@ window.addEventListener("beforeunload", stopCamera);
 
 renderAppendicitisForm();
 els.appendicitisForm.addEventListener("input", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
+els.appendicitisForm.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-toggle-appendicitis-advanced]");
+  if (!toggle) return;
+  const key = toggle.dataset.toggleAppendicitisAdvanced;
+  const panel = els.appendicitisForm.querySelector(`[data-appendicitis-advanced-panel="${key}"]`);
+  if (!panel) return;
+  panel.hidden = !panel.hidden;
+  toggle.textContent = panel.hidden ? "展开复核/溯源信息" : "收起复核/溯源信息";
+});
 els.appendicitisForm.addEventListener("change", (event) => {
   const field = event.target.closest("[data-appendicitis-field]");
   if (field?.dataset.appendicitisField === "suggested_wses_grade") {
