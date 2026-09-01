@@ -135,7 +135,7 @@ function renderAppendicitisForm() {
   els.appendicitisForm.innerHTML = APPENDICITIS_FIELD_GROUPS.map((group) => {
     const fields = group.fields.map((field) => {
       const control = field.type === "select"
-        ? `<select data-appendicitis-field="${field.key}"><option value="">未填写</option>${field.options.map((option) => `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`).join("")}</select>`
+        ? `<select data-appendicitis-field="${field.key}" data-default-value="${escapeHtml(field.defaultValue || "")}"><option value="">未填写</option>${field.options.map((option) => `<option value="${escapeHtml(option)}"${field.defaultValue === option ? " selected" : ""}>${escapeHtml(option)}</option>`).join("")}</select>`
         : field.type === "textarea"
           ? `<textarea data-appendicitis-field="${field.key}" rows="2" placeholder="${escapeHtml(field.placeholder || "")}"></textarea>`
           : `<input data-appendicitis-field="${field.key}" type="${field.type}"${field.step ? ` step="${field.step}"` : ""}${field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : ""} />`;
@@ -158,7 +158,10 @@ function applyAppendicitisData(data = {}) {
   const normalized = normalizeAppendicitisData(data);
   state.appendicitisData = { ...normalized };
   els.appendicitisForm?.querySelectorAll("[data-appendicitis-field]").forEach((input) => {
-    input.value = normalized[input.dataset.appendicitisField] || "";
+    const key = input.dataset.appendicitisField;
+    input.value = Object.prototype.hasOwnProperty.call(normalized, key)
+      ? (normalized[key] || "")
+      : (input.dataset.defaultValue || "");
   });
   updateAppendicitisProgress();
 }
@@ -200,9 +203,22 @@ function updateAppendicitisProgress() {
   state.appendicitisData = data;
   const suggestedGrade = getSuggestedWsesGrade(data);
   const suggestedGradeInput = els.appendicitisForm?.querySelector('[data-appendicitis-field="suggested_wses_grade"]');
-  if (suggestedGradeInput && !suggestedGradeInput.value.trim() && suggestedGrade) {
+  const adjudicationStatusInput = els.appendicitisForm?.querySelector('[data-appendicitis-field="label_adjudication_status"]');
+  const machineSuggestionStillEditable = suggestedGradeInput && !suggestedGradeInput.dataset.manuallyEdited
+    && (!adjudicationStatusInput?.value || adjudicationStatusInput.value === "机器建议待确认");
+  if (machineSuggestionStillEditable && suggestedGradeInput.value.trim() !== suggestedGrade) {
     suggestedGradeInput.value = suggestedGrade;
     data.suggested_wses_grade = suggestedGrade;
+    state.appendicitisData = data;
+  }
+  if (machineSuggestionStillEditable && suggestedGrade && adjudicationStatusInput && !adjudicationStatusInput.value) {
+    adjudicationStatusInput.value = "机器建议待确认";
+    data.label_adjudication_status = "机器建议待确认";
+    state.appendicitisData = data;
+  }
+  if (machineSuggestionStillEditable && !suggestedGrade && adjudicationStatusInput?.value === "机器建议待确认") {
+    adjudicationStatusInput.value = "";
+    data.label_adjudication_status = "";
     state.appendicitisData = data;
   }
   const total = APPENDICITIS_FIELD_DEFS.length;
@@ -425,6 +441,7 @@ function applyAutoAppendicitisFields(text, type) {
   if (type === "手术记录") {
     changed = setAppendicitisAutoValue("operative_report_available", "有") || changed;
     changed = setAppendicitisAutoValue("grade_source", "手术记录") || changed;
+    changed = setAppendicitisAutoValue("machine_grade_basis", "术中记录OCR") || changed;
     const perforationLocation = compact.match(/阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端).{0,8}(?:穿孔|破口|破裂)/i)?.[1]
       || compact.match(/(?:穿孔|破口|破裂).{0,8}(?:位于|在|于)?阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端)/i)?.[1];
     if (perforationLocation) changed = setAppendicitisAutoValue("perforation_location", `阑尾${perforationLocation}`) || changed;
@@ -792,19 +809,20 @@ const APPENDICITIS_FIELD_GROUPS = [
   {
     key: "labelAdjudication",
     title: "WSES分级复核与Unknown组",
-    hint: "按 0、1、2A、2B、3A、3B（脓肿＜4 cm）、3C（脓肿＞4 cm）、4、5 记录；只写“穿孔”或“腹膜炎”或脓肿恰为4 cm时，保留Unknown原因并安排双人复核。",
+    hint: "视频/照片通常不可获取时，机器根据手术记录OCR和已录入的术中所见自动给出WSES建议；机器建议可用于初步归档，但要保留输入来源和复核状态。按 0、1、2A、2B、3A、3B（脓肿＜4 cm）、3C（脓肿＞4 cm）、4、5 记录；只写“穿孔”或“腹膜炎”或脓肿恰为4 cm时，保留Unknown原因。",
     types: ["手术记录", "CT", "彩超", "住院病历", "出院小结"],
     fields: [
-      { key: "suggested_wses_grade", label: "机器建议WSES分级（待确认）", type: "select", options: WSES_GRADE_OPTIONS },
+      { key: "suggested_wses_grade", label: "机器WSES分级建议（无视频/照片时依据术中记录）", type: "select", options: WSES_GRADE_OPTIONS },
+      { key: "machine_grade_basis", label: "机器分级输入来源", type: "select", options: ["术中记录OCR", "手工录入术中字段", "术中记录OCR+手工修订", "未记录"] },
       { key: "operative_report_available", label: "手术记录是否可获取", type: "select", options: ["有", "无", "部分/不完整", "未核实"] },
-      { key: "operative_media_available", label: "腹腔镜视频/照片是否可获取", type: "select", options: ["有", "无", "未核实", "不适用"] },
+      { key: "operative_media_available", label: "腹腔镜视频/照片是否可获取（默认无）", type: "select", options: ["有", "无", "未核实", "不适用"], defaultValue: "无" },
       { key: "unknown_reason", label: "Unknown原因", type: "textarea", placeholder: "如：只写腹膜炎，未说明局限/弥漫；缺少手术记录；脓肿大小未报告" },
       { key: "reviewer_1_grade", label: "复核者1分级", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "reviewer_2_grade", label: "复核者2分级", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "final_adjudicated_grade", label: "最终仲裁分级", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "reviewer_1_comment", label: "复核者1意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
       { key: "reviewer_2_comment", label: "复核者2意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
-      { key: "label_adjudication_status", label: "标签复核状态", type: "select", options: ["无需复核", "待双人复核", "已完成复核", "无法判定"] },
+      { key: "label_adjudication_status", label: "标签复核状态", type: "select", options: ["机器建议待确认", "无需复核", "待双人复核", "已完成复核", "无法判定"] },
     ],
   },
   {
@@ -1316,7 +1334,7 @@ function buildAppendicitisResearchSummary(data = getCurrentAppendicitisData()) {
     if (!rows.length) return "";
     return `${group.title}\n${rows.map((field) => `${field.label}：${data[field.key]}`).join("；")}`;
   }).filter(Boolean);
-  return `急性阑尾炎科研摘要\n穿孔相关证据（按记录来源）：${evidence}\nWSES分级：${wses}\n\n${sections.join("\n\n")}\n\n提示：机器建议仅用于提示，最终WSES分级必须依据术中客观所见并由人工确认；术中 perforation_primary 是主要结局，病理穿孔不能替代术中结局；对未描述内容不作“无”的推断。`;
+  return `急性阑尾炎科研摘要\n穿孔相关证据（按记录来源）：${evidence}\nWSES分级：${wses}\n\n${sections.join("\n\n")}\n\n提示：当前按“无腹腔镜视频/照片”设计，机器建议依据术中记录OCR和已录入的术中所见生成，可作为科研归档的默认分组；机器输入来源和复核状态会一并导出。对未描述内容不作“无”的推断；若需要把机器结果直接作为最终研究标签，应在研究方案中预先规定并单独标记。`;
 }
 
 function appendAppendicitisResearchSummary(baseSummary, mode = state.summaryMode) {
@@ -2632,7 +2650,7 @@ const APPENDICITIS_RESEARCH_TABLES = [
     key: "operativeWses",
     name: "术中结局_WSES",
     sourceGroups: ["perforationCore", "operative", "labelAdjudication", "pathology"],
-    fields: ["perforationStatus", "perforationBasis", "appendix_macroscopic_status", "perforation_primary", "perforation_location", "perforation_type", "necrosis_present", "necrosis_location", "phlegmon_present", "abscess_present", "operative_abscess_size_cm", "peritoneal_extent", "contamination_type", "free_appendicolith", "final_wses_grade", "grade_source", "simpleInflammation", "suppuration", "gangrene", "operativeAppendicolith", "operativePurulentExudate", "suggested_wses_grade", "operative_report_available", "operative_media_available", "unknown_reason", "reviewer_1_grade", "reviewer_2_grade", "final_adjudicated_grade", "reviewer_1_comment", "reviewer_2_comment", "label_adjudication_status", "pathology_acute_appendicitis_confirmed", "pathologyDiagnosis", "pathologyPerforation", "pathologyAppendicolith", "appendixTumor", "pathologyText"],
+    fields: ["perforationStatus", "perforationBasis", "appendix_macroscopic_status", "perforation_primary", "perforation_location", "perforation_type", "necrosis_present", "necrosis_location", "phlegmon_present", "abscess_present", "operative_abscess_size_cm", "peritoneal_extent", "contamination_type", "free_appendicolith", "final_wses_grade", "grade_source", "simpleInflammation", "suppuration", "gangrene", "operativeAppendicolith", "operativePurulentExudate", "suggested_wses_grade", "machine_grade_basis", "operative_report_available", "operative_media_available", "unknown_reason", "reviewer_1_grade", "reviewer_2_grade", "final_adjudicated_grade", "reviewer_1_comment", "reviewer_2_comment", "label_adjudication_status", "pathology_acute_appendicitis_confirmed", "pathologyDiagnosis", "pathologyPerforation", "pathologyAppendicolith", "appendixTumor", "pathologyText"],
   },
   {
     key: "postoperative",
@@ -3074,7 +3092,16 @@ window.addEventListener("beforeunload", stopCamera);
 
 renderAppendicitisForm();
 els.appendicitisForm.addEventListener("input", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
-els.appendicitisForm.addEventListener("change", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); });
+els.appendicitisForm.addEventListener("change", (event) => {
+  const field = event.target.closest("[data-appendicitis-field]");
+  if (field?.dataset.appendicitisField === "suggested_wses_grade") {
+    field.dataset.manuallyEdited = "true";
+    const status = els.appendicitisForm.querySelector('[data-appendicitis-field="label_adjudication_status"]');
+    if (status?.value === "机器建议待确认") status.value = "待双人复核";
+  }
+  updateAppendicitisProgress();
+  scheduleCaptureDraftSave();
+});
 els.appendicitisEnabled.addEventListener("change", () => {
   els.appendicitisCapture.hidden = !els.appendicitisEnabled.checked;
   scheduleCaptureDraftSave();
