@@ -322,6 +322,8 @@ function applyAutoAppendicitisFields(text, type) {
   const weightKg = compact.match(/体重[:：]?([0-9]+(?:\.[0-9]+)?)\s*(?:kg|千克)/i)?.[1];
   const heartRate = compact.match(/(?:心率|脉搏)[:：]?([0-9]{2,3})/i)?.[1];
   const bloodPressure = compact.match(/(?:血压|BP)[:：]?([0-9]{2,3})\s*[/／]\s*([0-9]{2,3})/i);
+  const respiratoryRate = compact.match(/(?:呼吸频率|呼吸|RR)[:：]?([0-9]{1,2})/i)?.[1];
+  const spo2 = compact.match(/(?:血氧饱和度|血氧|SpO2)[:：]?([0-9]{2,3}(?:\.[0-9]+)?)\s*%?/i)?.[1];
   changed = setAppendicitisAutoValue("age", age) || changed;
   changed = setAppendicitisAutoValue("admissionTempC", temperature) || changed;
   changed = setAppendicitisAutoValue("painDurationHours", painHours) || changed;
@@ -338,20 +340,33 @@ function applyAutoAppendicitisFields(text, type) {
   changed = setAppendicitisAutoValue("heart_rate", heartRate) || changed;
   changed = setAppendicitisAutoValue("systolic_bp", bloodPressure?.[1]) || changed;
   changed = setAppendicitisAutoValue("diastolic_bp", bloodPressure?.[2]) || changed;
+  changed = setAppendicitisAutoValue("respiratory_rate", respiratoryRate) || changed;
+  changed = setAppendicitisAutoValue("spo2", spo2) || changed;
   if (compact.includes("抗生素前")) changed = setAppendicitisAutoValue("preop_timepoint", "入院后、手术前、抗生素前") || changed;
   if (compact.includes("抗生素后")) changed = setAppendicitisAutoValue("preop_timepoint", "入院后、手术前、抗生素后") || changed;
   if (compact.includes("抗生素前")) changed = setAppendicitisAutoValue("preop_antibiotic_status", "抗生素前") || changed;
   if (compact.includes("抗生素后")) changed = setAppendicitisAutoValue("preop_antibiotic_status", "抗生素后") || changed;
-  if (["CT", "彩超"].includes(type)) changed = setAppendicitisAutoValue("imagingMethod", type) || changed;
+  if (labFieldRules[type]) changed = setAppendicitisAutoValue("lab_collection_status", "已采集") || changed;
+  if (["CT", "彩超"].includes(type)) {
+    changed = setAppendicitisAutoValue("imagingMethod", type) || changed;
+    changed = setAppendicitisAutoValue("imaging_status", "已检查") || changed;
+  }
 
   const rows = labFieldRules[type] ? extractAllLabRows(text, state.ocrBlocks) : [];
   const metricMappings = [
     ["lymphPct", ["LYMPH%"], ["淋巴细胞百分比"]], ["fibrinogen", ["FIB"], ["纤维蛋白原"]],
     ["wbc", ["WBC"], ["白细胞"]], ["neutAbs", ["NEUT#"], ["中性粒细胞绝对数"]],
     ["neutPct", ["NEUT%"], ["中性粒细胞百分比"]], ["lymphAbs", ["LYMPH#"], ["淋巴细胞绝对数"]],
+    ["monocyteAbs", ["MONO#"], ["单核细胞绝对数"]], ["monocytePct", ["MONO%"], ["单核细胞百分比"]],
+    ["hgb", ["HGB", "HB"], ["血红蛋白"]],
     ["plt", ["PLT"], ["血小板计数"]], ["crp", ["CRP"], ["C反应蛋白"]],
-    ["creatinine", ["CREA", "CR"], ["肌酐"]], ["albumin", ["ALB"], ["白蛋白"]],
-    ["totalBilirubin", ["TBIL"], ["总胆红素"]], ["glucose", ["GLU"], ["葡萄糖", "血糖"]],
+    ["pct", [], ["降钙素原", "降钙素"]], ["creatinine", ["CREA", "CR"], ["肌酐"]],
+    ["egfr", ["EGFR"], ["估算肾小球滤过率", "肾小球滤过率"]], ["urea", ["UREA", "BUN"], ["尿素"]],
+    ["albumin", ["ALB"], ["白蛋白"]], ["totalBilirubin", ["TBIL"], ["总胆红素"]],
+    ["glucose", ["GLU"], ["葡萄糖", "血糖"]], ["lactate", ["LAC", "LACTATE"], ["乳酸"]],
+    ["ast", ["AST"], ["天门冬氨酸氨基转移酶", "谷草转氨酶"]], ["alt", ["ALT"], ["丙氨酸氨基转移酶", "谷丙转氨酶"]],
+    ["sodium", ["NA", "NAT"], ["钠"]], ["potassium", ["K"], ["钾"]],
+    ["chloride", ["CL"], ["氯"]], ["calcium", ["CA"], ["钙"]],
   ];
   metricMappings.forEach(([key, abbreviations, names]) => {
     const metric = getMetricByAbbreviations(rows, abbreviations, names);
@@ -359,28 +374,48 @@ function applyAutoAppendicitisFields(text, type) {
   });
 
   const findingMappings = [
+    ...(type === "门诊病历" || type === "住院病历" || type === "出院小结" ? [
+      ["right_lower_quadrant_pain", ["右下腹痛", "右下腹疼痛"]], ["migratoryPain", ["转移性腹痛", "疼痛转移"]],
+      ["nausea_vomiting", ["恶心", "呕吐"]], ["appetite_loss", ["食欲下降", "纳差"]],
+      ["diarrhea", ["腹泻"]], ["fever_chills", ["发热", "寒战"]],
+      ["right_lower_quadrant_tenderness", ["右下腹压痛"]], ["rebound_pain", ["反跳痛"]],
+      ["guarding", ["肌紧张"]], ["localized_peritoneal_irritation", ["局限性腹膜刺激征", "局限性腹膜炎"]],
+      ["diffuse_peritoneal_irritation", ["弥漫性腹膜刺激征", "弥漫性腹膜炎"]],
+      ["antibiotics_before_admission", ["入院前使用抗生素", "入院前应用抗生素"]],
+      ["analgesics_before_admission", ["入院前使用止痛药", "入院前应用止痛药"]],
+    ] : []),
     ...(type === "CT" || type === "彩超" ? [
       ["imagingAppendicolith", ["粪石", "阑尾结石"]], ["fatStranding", ["脂肪浸润", "脂肪间隙浑浊"]],
       ["periAppendicealFluid", ["阑尾周围积液", "周围积液"]], ["imagingAbscess", ["脓肿", "脓腔"]],
       ["imagingPhlegmon", ["炎性包块", "包块"]], ["freeGas", ["游离气体", "游离气"]],
+      ["appendix_wall_discontinuity", ["阑尾壁中断", "阑尾壁缺损", "阑尾壁不连续"]],
+      ["free_fluid", ["游离液体", "腹腔积液"]],
       ["imagingPerforation", ["穿孔", "破裂", "壁缺损"]],
     ] : []),
     ...(type === "手术记录" ? [
       ["operativeAppendicolith", ["粪石", "阑尾结石"]], ["operativePurulentExudate", ["脓液", "脓性渗出", "脓性分泌物"]],
       ["abscess_present", ["脓肿", "脓腔"]], ["phlegmon_present", ["炎性包块", "包块"]],
-      ["perforation_present", ["穿孔", "破裂", "破口", "壁缺损"]], ["drainagePlaced", ["腹腔引流", "放置引流", "引流管"]],
+      ["perforation_primary", ["穿孔", "破裂", "破口", "壁缺损"]], ["drainagePlaced", ["腹腔引流", "放置引流", "引流管"]],
+      ["necrosis_present", ["坏死", "坏疽"]], ["free_appendicolith", ["游离粪石"]],
+      ["laparoscopy_exploration", ["腹腔镜探查", "腹腔镜手术"]], ["laparoscopy_completed", ["完成腹腔镜", "腹腔镜下完成"]],
+      ["appendectomy_attempted", ["阑尾切除", "切除阑尾", "阑尾切除术"]], ["conversion_to_open", ["中转开腹", "转开腹"]],
     ] : []),
     ...(type === "病理报告" ? [
       ["pathologyPerforation", ["穿孔", "破裂", "壁缺损"]], ["pathologyAppendicolith", ["粪石", "阑尾结石"]],
+      ["pathology_acute_appendicitis_confirmed", ["急性阑尾炎"]],
     ] : []),
   ];
   findingMappings.forEach(([key, terms]) => {
     const stateValue = extractFindingState(text, terms);
-    if (stateValue) changed = setAppendicitisAutoValue(key, stateValue) || changed;
+    const normalizedStateValue = key === "perforation_primary" ? ({ 有: "是", 无: "否" }[stateValue] || stateValue) : stateValue;
+    if (normalizedStateValue) changed = setAppendicitisAutoValue(key, normalizedStateValue) || changed;
   });
   const abscessSizeCm = compact.match(/(?:脓肿|脓腔).{0,25}?(?:最大径|直径|大小|约)[:：]?([0-9]+(?:\.[0-9]+)?)\s*(?:cm|厘米)/i)?.[1];
   if (type === "CT" || type === "彩超") {
     changed = setAppendicitisAutoValue("imaging_abscess_size_cm", abscessSizeCm) || changed;
+    const imagingPerforationLocation = compact.match(/阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端).{0,8}(?:穿孔|破口|破裂|壁缺损)/i)?.[1]
+      || compact.match(/(?:穿孔|破口|破裂|壁缺损).{0,8}(?:位于|在|于)?阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端)/i)?.[1];
+    if (imagingPerforationLocation) changed = setAppendicitisAutoValue("imaging_perforation_location", `阑尾${imagingPerforationLocation}`) || changed;
   }
   if (type === "手术记录") {
     changed = setAppendicitisAutoValue("operative_abscess_size_cm", abscessSizeCm) || changed;
@@ -389,6 +424,7 @@ function applyAutoAppendicitisFields(text, type) {
   changed = setAppendicitisAutoValue("final_wses_grade", explicitGrade) || changed;
   if (type === "手术记录") {
     changed = setAppendicitisAutoValue("operative_report_available", "有") || changed;
+    changed = setAppendicitisAutoValue("grade_source", "手术记录") || changed;
     const perforationLocation = compact.match(/阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端).{0,8}(?:穿孔|破口|破裂)/i)?.[1]
       || compact.match(/(?:穿孔|破口|破裂).{0,8}(?:位于|在|于)?阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端)/i)?.[1];
     if (perforationLocation) changed = setAppendicitisAutoValue("perforation_location", `阑尾${perforationLocation}`) || changed;
@@ -427,13 +463,18 @@ function getLocalFallback() {
 function normalizeAppendicitisData(data = {}) {
   const normalized = data && typeof data === "object" ? { ...data } : {};
   const aliases = {
+    study_id: ["studyId"],
+    admission_datetime: ["admissionTime", "admissionDate"],
+    right_lower_quadrant_tenderness: ["rlqTenderness"],
     perforation_location: ["perforationLocation"],
-    perforation_present: ["operativePerforation"],
+    perforation_primary: ["perforation_present", "operativePerforation"],
     abscess_present: ["operativeAbscess"],
     phlegmon_present: ["operativePhlegmon"],
     peritoneal_extent: ["operativePeritonitis"],
     imaging_abscess_size_cm: ["imagingAbscessSizeCm", "abscessSizeCm"],
+    pathology_acute_appendicitis_confirmed: ["pathologyAcuteAppendicitisConfirmed"],
     postoperative_antibiotic_duration_days: ["antibioticDurationDays"],
+    discharge_date: ["dischargeDate"],
   };
   Object.entries(aliases).forEach(([canonical, legacyKeys]) => {
     if (isAppendicitisValueFilled(normalized[canonical])) return;
@@ -562,7 +603,7 @@ const labFieldRules = {
   ],
 };
 
-const APPENDICITIS_VALUE_OPTIONS = ["有", "无", "未描述", "不确定"];
+const APPENDICITIS_VALUE_OPTIONS = ["有", "无", "未检查", "未记录", "未描述", "不确定"];
 const PREOP_TIMEPOINT_OPTIONS = ["入院后、手术前、抗生素前", "入院后、手术前、抗生素后", "手术前但具体时间不明", "不适用", "未记录"];
 const WSES_GRADE_OPTIONS = ["0", "1", "2A", "2B", "3A", "3B", "3C", "4", "5", "未判定"];
 const APPENDICITIS_FIELD_GROUPS = [
@@ -572,12 +613,16 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "建立病例时填写；OCR可辅助识别年龄和性别",
     alwaysOpen: true,
     fields: [
-      { key: "studyId", label: "研究编号", type: "text", placeholder: "如 APP-0001" },
-      { key: "admissionDate", label: "入院日期", type: "date" },
+      { key: "study_id", label: "研究编号（study_id）", type: "text", placeholder: "如 APP-0001；同一 index episode 的多份资料保持一致" },
+      { key: "hospital_center", label: "医院/中心", type: "text", placeholder: "如：高新院区；单中心也建议保留" },
+      { key: "admission_datetime", label: "入院日期时间", type: "datetime-local" },
       { key: "age", label: "年龄（岁）", type: "number", step: "0.1" },
       { key: "sex", label: "性别", type: "select", options: ["男", "女", "其他/不详"] },
       { key: "heightCm", label: "身高（cm）", type: "number", step: "0.1" },
       { key: "weightKg", label: "体重（kg）", type: "number", step: "0.1" },
+      { key: "first_acute_appendicitis_episode", label: "首次急性阑尾炎发作", type: "select", options: ["是", "否", "不确定", "未记录"] },
+      { key: "index_episode", label: "是否为纳入的 index episode", type: "select", options: ["是", "否", "重复住院/重复发作", "不确定", "未记录"] },
+      { key: "exclusion_reason", label: "排除原因", type: "textarea", placeholder: "仅在不纳入或重复 episode 时填写具体原因" },
     ],
   },
   {
@@ -586,10 +631,20 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "拍入院病历或询问病例时同步填写",
     types: ["住院病历", "门诊病历", "出院小结"],
     fields: [
+      { key: "symptom_onset_datetime", label: "症状开始时间", type: "datetime-local" },
       { key: "painDurationHours", label: "腹痛持续时间（小时）", type: "number", step: "0.1" },
+      { key: "right_lower_quadrant_pain", label: "右下腹痛", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "migratoryPain", label: "转移性右下腹痛", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
-      { key: "rlqTenderness", label: "右下腹压痛", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
-      { key: "reboundGuarding", label: "反跳痛或肌紧张", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "nausea_vomiting", label: "恶心/呕吐", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "appetite_loss", label: "食欲下降", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "diarrhea", label: "腹泻", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "fever_chills", label: "发热/寒战", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "right_lower_quadrant_tenderness", label: "右下腹压痛", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "rebound_pain", label: "反跳痛", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "guarding", label: "肌紧张", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "localized_peritoneal_irritation", label: "局限性腹膜刺激征", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "diffuse_peritoneal_irritation", label: "弥漫性腹膜刺激征", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "reboundGuarding", label: "反跳痛或肌紧张（合并记录）", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "admissionTempC", label: "入院体温（℃）", type: "number", step: "0.1" },
       { key: "clinicalPeritonitis", label: "明确腹膜炎", type: "select", options: ["无", "局限性", "弥漫性", "未描述", "不确定"] },
     ],
@@ -607,39 +662,57 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "heart_rate", label: "心率（次/分）", type: "number", step: "1" },
       { key: "systolic_bp", label: "收缩压（mmHg）", type: "number", step: "1" },
       { key: "diastolic_bp", label: "舒张压（mmHg）", type: "number", step: "1" },
+      { key: "respiratory_rate", label: "呼吸频率（次/分）", type: "number", step: "1" },
+      { key: "spo2", label: "血氧饱和度（%）", type: "number", step: "0.1" },
+      { key: "antibiotics_before_admission", label: "入院前使用抗生素", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "analgesics_before_admission", label: "入院前使用止痛药", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
     ],
   },
   {
     key: "perforationCore",
     title: "穿孔判定（核心）",
-    hint: "研究分组由人工确认；下方影像、术中和病理证据仍分别保留，不以单一来源替代最终判断",
+    hint: "本区记录穿孔相关证据，不作为队列纳入门槛；术中主要结局请填写下方“术中明确穿孔（perforation_primary）”。",
     alwaysOpen: true,
     fields: [
-      { key: "perforationStatus", label: "研究纳入判定（必须明确穿孔）", type: "select", options: ["明确穿孔", "疑似穿孔", "未见穿孔", "待判定"] },
+      { key: "perforationStatus", label: "穿孔相关综合判断（非纳入门槛）", type: "select", options: ["明确穿孔", "疑似穿孔", "未见穿孔", "待判定"] },
       { key: "perforation_location", label: "穿孔部位/范围", type: "text", placeholder: "如：阑尾尖端、体部、根部；未描述可留空" },
-      { key: "perforationBasis", label: "穿孔判定依据摘要", type: "textarea", placeholder: "如：术中见阑尾体部穿孔伴脓液；CT示阑尾壁缺损" },
+      { key: "perforationBasis", label: "穿孔相关依据摘要（可选）", type: "textarea", placeholder: "如：术中见阑尾体部穿孔伴脓液；CT示阑尾壁缺损" },
     ],
   },
   {
     key: "labs",
     title: "首次化验",
-    hint: "OCR自动填入；手工改动会保留，优先填写治疗前结果",
+    hint: "OCR自动填入；手工改动会保留，优先填写首次抗生素前结果。未检查与未记录分开填写，NLR/PLR/SIRI/PNI等衍生指标后期由原始值统一计算。",
     types: ["血常规", "肝肾功能", "止凝血"],
     fields: [
       { key: "lab_timepoint", label: "化验时间点", type: "select", options: PREOP_TIMEPOINT_OPTIONS },
       { key: "lab_collection_time", label: "化验采集时间", type: "datetime-local" },
+      { key: "lab_collection_status", label: "化验资料状态", type: "select", options: ["已采集", "未检查", "未记录", "不确定"] },
       { key: "lymphPct", label: "LYMPH%（%）", type: "number", step: "0.1" },
       { key: "fibrinogen", label: "FIB（g/L）", type: "number", step: "0.01" },
       { key: "wbc", label: "WBC（×10⁹/L）", type: "number", step: "0.01" },
       { key: "neutAbs", label: "NEUT#（×10⁹/L）", type: "number", step: "0.01" },
       { key: "neutPct", label: "NEUT%（%）", type: "number", step: "0.1" },
       { key: "lymphAbs", label: "LYMPH#（×10⁹/L）", type: "number", step: "0.01" },
+      { key: "monocyteAbs", label: "MONO#（×10⁹/L）", type: "number", step: "0.01" },
+      { key: "monocytePct", label: "MONO%（%）", type: "number", step: "0.1" },
+      { key: "hgb", label: "HGB（g/L）", type: "number", step: "0.1" },
       { key: "plt", label: "PLT（×10⁹/L）", type: "number", step: "1" },
       { key: "crp", label: "CRP（mg/L）", type: "number", step: "0.1" },
+      { key: "pct", label: "PCT/降钙素原（ng/mL）", type: "number", step: "0.01" },
       { key: "creatinine", label: "肌酐 Cr（μmol/L）", type: "number", step: "0.1" },
+      { key: "egfr", label: "eGFR（mL/min/1.73m²）", type: "number", step: "0.1" },
+      { key: "urea", label: "尿素 UREA/BUN（mmol/L）", type: "number", step: "0.1" },
       { key: "albumin", label: "白蛋白 ALB（g/L）", type: "number", step: "0.1" },
       { key: "totalBilirubin", label: "总胆红素 TBIL（μmol/L）", type: "number", step: "0.1" },
       { key: "glucose", label: "血糖 GLU（mmol/L）", type: "number", step: "0.1" },
+      { key: "lactate", label: "乳酸（mmol/L）", type: "number", step: "0.01" },
+      { key: "ast", label: "AST（U/L）", type: "number", step: "0.1" },
+      { key: "alt", label: "ALT（U/L）", type: "number", step: "0.1" },
+      { key: "sodium", label: "钠 Na（mmol/L）", type: "number", step: "0.1" },
+      { key: "potassium", label: "钾 K（mmol/L）", type: "number", step: "0.1" },
+      { key: "chloride", label: "氯 Cl（mmol/L）", type: "number", step: "0.1" },
+      { key: "calcium", label: "钙 Ca（mmol/L）", type: "number", step: "0.01" },
     ],
   },
   {
@@ -649,17 +722,22 @@ const APPENDICITIS_FIELD_GROUPS = [
     types: ["CT", "彩超"],
     fields: [
       { key: "imaging_timepoint", label: "影像检查时间点", type: "select", options: PREOP_TIMEPOINT_OPTIONS },
+      { key: "imaging_exam_time", label: "影像检查时间", type: "datetime-local" },
+      { key: "imaging_status", label: "影像资料状态", type: "select", options: ["已检查", "未检查", "未记录", "不确定"] },
       { key: "imaging_abscess_size_cm", label: "影像脓肿最大径（cm）", type: "number", step: "0.1" },
-      { key: "imagingMethod", label: "影像方式", type: "select", options: ["CT", "彩超", "CT+彩超", "无", "未描述"] },
+      { key: "imagingMethod", label: "影像方式", type: "select", options: ["CT", "彩超", "MRI", "CT+彩超", "无", "未检查", "未记录", "未描述"] },
       { key: "appendixDiameterMm", label: "阑尾最大直径（mm）", type: "number", step: "0.1" },
       { key: "imagingAppendicolith", label: "影像粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "appendicolithSizeMm", label: "粪石最大径（mm）", type: "number", step: "0.1" },
+      { key: "appendix_wall_discontinuity", label: "阑尾壁中断/缺损", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "fatStranding", label: "周围脂肪浸润", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "periAppendicealFluid", label: "阑尾周围积液", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "free_fluid", label: "腹腔游离液体", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "imagingAbscess", label: "影像脓肿", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "imagingPhlegmon", label: "影像炎性包块", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "freeGas", label: "游离气体", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "imagingPerforation", label: "影像考虑穿孔", type: "select", options: ["有", "无", "未描述", "不确定"] },
+      { key: "imaging_perforation_location", label: "影像提示穿孔位置", type: "text", placeholder: "如：阑尾根部/体部；未描述留空" },
     ],
   },
   {
@@ -668,16 +746,21 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "能从记录读取的时间可自动识别，其余现场补录",
     types: ["住院病历", "手术记录", "出院小结"],
     fields: [
-      { key: "admissionTime", label: "入院时间", type: "datetime-local" },
       { key: "antibioticTime", label: "首次抗生素时间", type: "datetime-local" },
       { key: "operationStartTime", label: "手术开始时间", type: "datetime-local" },
       { key: "treatmentStrategy", label: "治疗策略", type: "select", options: ["直接手术", "抗菌药物/保守治疗", "介入引流后手术", "其他", "未记录"] },
       { key: "surgeryMethod", label: "手术方式", type: "select", options: ["腹腔镜", "开放", "中转开放", "未手术", "未记录"] },
+      { key: "laparoscopy_exploration", label: "是否腹腔镜探查", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "laparoscopy_completed", label: "是否完成腹腔镜", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "appendectomy_attempted", label: "是否尝试阑尾切除", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "conversion_to_open", label: "中转开腹", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "conversion_reason", label: "中转开腹原因", type: "textarea", placeholder: "未中转填写“无”，未记录填写“未记录”" },
       { key: "operationDurationMin", label: "手术时间（分钟）", type: "number", step: "1" },
       { key: "drainagePlaced", label: "腹腔引流", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "drainageDurationDays", label: "引流留置时间（天）", type: "number", step: "0.1" },
+      { key: "postoperative_antibiotic_name", label: "术后抗生素种类", type: "textarea", placeholder: "药名和方案；未记录填写“未记录”" },
       { key: "postoperative_antibiotic_duration_days", label: "术后抗生素疗程（天）", type: "number", step: "0.1" },
+      { key: "icu_admission", label: "ICU入住", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
     ],
   },
   {
@@ -687,15 +770,18 @@ const APPENDICITIS_FIELD_GROUPS = [
     types: ["手术记录"],
     fields: [
       { key: "appendix_macroscopic_status", label: "阑尾大体外观", type: "select", options: ["正常外观", "单纯炎症", "节段性坏死", "根部坏死", "蜂窝织炎/炎性包块", "脓肿", "局限性腹膜炎", "弥漫性腹膜炎", "其他", "未记录"] },
+      { key: "necrosis_present", label: "阑尾坏死", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "necrosis_location", label: "坏死部位", type: "select", options: ["无", "节段性", "阑尾根部", "其他", "未描述", "不确定"] },
       { key: "abscess_present", label: "术中脓肿", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "operative_abscess_size_cm", label: "术中脓肿最大径（cm）", type: "number", step: "0.1" },
       { key: "phlegmon_present", label: "术中蜂窝织炎/炎性包块", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
-      { key: "perforation_present", label: "术中穿孔（WSES标签依据）", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
+      { key: "perforation_primary", label: "术中明确穿孔（主要结局）", type: "select", options: ["是", "否", "未记录", "不确定"] },
       { key: "peritoneal_extent", label: "腹膜炎范围", type: "select", options: ["无", "局限性", "弥漫性", "未描述", "不确定"] },
-      { key: "contamination_type", label: "腹腔污染性质", type: "select", options: ["无", "脓性", "粪性", "混合", "未描述", "不确定"] },
+      { key: "contamination_type", label: "腹腔污染性质", type: "select", options: ["无", "清亮", "脓性", "粪性", "混合", "未检查", "未记录", "未描述", "不确定"] },
       { key: "perforation_type", label: "穿孔类型", type: "select", options: ["无", "局限/包裹性", "游离性", "未描述", "不确定"] },
+      { key: "free_appendicolith", label: "游离粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "final_wses_grade", label: "最终WSES分级（术中结局）", type: "select", options: WSES_GRADE_OPTIONS },
+      { key: "grade_source", label: "WSES分级依据来源", type: "select", options: ["手术记录", "腹腔镜视频/照片", "CT报告", "病理报告", "多来源复核", "其他", "未记录"] },
       { key: "simpleInflammation", label: "充血/单纯炎症", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "suppuration", label: "化脓", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "gangrene", label: "坏疽", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
@@ -716,7 +802,8 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "reviewer_1_grade", label: "复核者1分级", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "reviewer_2_grade", label: "复核者2分级", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "final_adjudicated_grade", label: "最终仲裁分级", type: "select", options: WSES_GRADE_OPTIONS },
-      { key: "grade_source", label: "分级依据来源", type: "select", options: ["手术记录", "CT报告", "腹腔镜视频/照片", "出院记录", "病理报告", "多来源复核", "其他", "未记录"] },
+      { key: "reviewer_1_comment", label: "复核者1意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
+      { key: "reviewer_2_comment", label: "复核者2意见", type: "textarea", placeholder: "记录分级依据或与另一位复核者的差异" },
       { key: "label_adjudication_status", label: "标签复核状态", type: "select", options: ["无需复核", "待双人复核", "已完成复核", "无法判定"] },
     ],
   },
@@ -726,6 +813,7 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "病理原文保留，便于以后重新定义分组",
     types: ["病理报告"],
     fields: [
+      { key: "pathology_acute_appendicitis_confirmed", label: "病理证实急性阑尾炎", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "pathologyDiagnosis", label: "病理诊断", type: "select", options: ["正常", "急性", "化脓", "坏疽", "其他", "未描述"] },
       { key: "pathologyPerforation", label: "病理穿孔", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "pathologyAppendicolith", label: "病理粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
@@ -739,7 +827,7 @@ const APPENDICITIS_FIELD_GROUPS = [
     hint: "出院时填写一次，30天结局可后续随访补录",
     types: ["出院小结"],
     fields: [
-      { key: "dischargeDate", label: "出院日期", type: "date" },
+      { key: "discharge_date", label: "出院日期", type: "date" },
       { key: "lengthOfStayDays", label: "总住院天数", type: "number", step: "0.1" },
       { key: "ssi30d", label: "30天切口感染 SSI", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "intraabdominalAbscess30d", label: "30天腹腔脓肿", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
@@ -1212,7 +1300,7 @@ function buildAppendicitisResearchSummary(data = getCurrentAppendicitisData()) {
   const evidenceFields = [
     ["研究分组", data.perforationStatus],
     ["影像", data.imagingPerforation],
-    ["术中", data.perforation_present],
+    ["术中", data.perforation_primary],
     ["病理", data.pathologyPerforation],
   ].filter(([, value]) => isAppendicitisValueFilled(value));
   const evidence = evidenceFields.length
@@ -1228,7 +1316,7 @@ function buildAppendicitisResearchSummary(data = getCurrentAppendicitisData()) {
     if (!rows.length) return "";
     return `${group.title}\n${rows.map((field) => `${field.label}：${data[field.key]}`).join("；")}`;
   }).filter(Boolean);
-  return `阑尾炎穿孔科研摘要\n穿孔核心证据（按记录来源）：${evidence}\nWSES分级：${wses}\n\n${sections.join("\n\n")}\n\n提示：机器建议仅用于提示，最终WSES分级必须依据术中客观所见并由人工确认；穿孔证据按影像、术中和病理来源分别保留，不对未描述内容作“无”的推断。`;
+  return `急性阑尾炎科研摘要\n穿孔相关证据（按记录来源）：${evidence}\nWSES分级：${wses}\n\n${sections.join("\n\n")}\n\n提示：机器建议仅用于提示，最终WSES分级必须依据术中客观所见并由人工确认；术中 perforation_primary 是主要结局，病理穿孔不能替代术中结局；对未描述内容不作“无”的推断。`;
 }
 
 function appendAppendicitisResearchSummary(baseSummary, mode = state.summaryMode) {
@@ -1968,26 +2056,35 @@ function getRecordNumbers(text) {
   return [...new Set(numbers.map((item) => item.trim()))].slice(0, 30);
 }
 
-function validatePerforationInclusion(data = getAppendicitisDataFromForm()) {
-  if (els.appendicitisEnabled?.checked === false) return { ok: false, message: "本项目仅收集明确穿孔病例，请先启用阑尾炎病例采集" };
-  if (String(data.perforationStatus || "").trim() !== "明确穿孔") return { ok: false, message: "本项目仅纳入明确穿孔病例，请在“穿孔判定（核心）”中选择“明确穿孔”" };
-  if (!String(data.perforationBasis || "").trim()) return { ok: false, message: "请填写穿孔判定依据摘要，说明来自影像、术中、病理或其他明确记录" };
+function validateStudyInclusion(data = getAppendicitisDataFromForm()) {
+  if (els.appendicitisEnabled?.checked === false) return { ok: false, message: "请先启用阑尾炎病例采集，才能按研究方案归档" };
+  if (!String(data.study_id || "").trim()) return { ok: false, message: "请填写 study_id；同一 index episode 的多份资料必须使用同一个研究编号" };
+  const indexEpisode = String(data.index_episode || "").trim();
+  if (!indexEpisode) return { ok: false, message: "请先选择是否为纳入的 index episode；重复住院/重复发作请排除并填写原因" };
+  if (["否", "重复住院/重复发作"].includes(indexEpisode) && !String(data.exclusion_reason || "").trim()) return { ok: false, message: "当前病例已标记为非 index episode，请填写排除原因后归档筛选记录" };
   return { ok: true };
 }
 
-function getPerforationInclusionStatus(data = {}) {
-  const status = String(data.perforationStatus || "").trim();
-  const basis = String(data.perforationBasis || "").trim();
-  if (status === "明确穿孔" && basis) return "纳入：明确穿孔";
-  if (status === "明确穿孔") return "明确穿孔（依据缺失）";
-  if (!status || status === "待判定") return "待判定";
-  return "不纳入：" + status;
+function getStudyInclusionStatus(data = {}) {
+  if (!String(data.study_id || "").trim()) return "待补录：study_id";
+  const indexEpisode = String(data.index_episode || "").trim();
+  if (["否", "重复住院/重复发作"].includes(indexEpisode)) return "不纳入：非 index episode";
+  if (!indexEpisode || ["不确定", "未记录"].includes(indexEpisode)) return "待判定：index episode";
+  const exploration = String(data.laparoscopy_exploration || "").trim();
+  const appendectomyAttempted = String(data.appendectomy_attempted || "").trim();
+  if (exploration === "无") return "不纳入：未接受腹腔镜探查";
+  if (appendectomyAttempted === "无") return "不纳入：未尝试阑尾切除";
+  if (exploration !== "有" || appendectomyAttempted !== "有") return "待补录：腹腔镜探查/阑尾切除尝试";
+  const primaryOutcome = String(data.perforation_primary || "").trim();
+  if (["是", "有"].includes(primaryOutcome)) return "纳入研究队列｜主要结局：穿孔";
+  if (["否", "无"].includes(primaryOutcome)) return "纳入研究队列｜主要结局：未穿孔";
+  return "纳入研究队列｜主要结局待补录";
 }
 
-function focusPerforationCore() {
+function focusResearchInclusion() {
   if (els.appendicitisEnabled) els.appendicitisEnabled.checked = true;
   if (els.appendicitisCapture) els.appendicitisCapture.hidden = false;
-  const group = els.appendicitisForm?.querySelector('[data-appendicitis-group="perforationCore"]');
+  const group = els.appendicitisForm?.querySelector('[data-appendicitis-group="basic"]');
   if (group) {
     group.open = true;
     group.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2014,10 +2111,10 @@ async function archiveCurrent() {
     return;
   }
   const appendicitisData = getAppendicitisDataFromForm();
-  const inclusion = validatePerforationInclusion(appendicitisData);
+  const inclusion = validateStudyInclusion(appendicitisData);
   if (!inclusion.ok) {
     showToast(inclusion.message, "error");
-    focusPerforationCore();
+    focusResearchInclusion();
     return;
   }
   const now = new Date();
@@ -2221,14 +2318,14 @@ function formatOverviewDate(record) {
 }
 
 function getPerforationEvidence(records) {
-  const sources = [["研究分组", "perforationStatus"], ["影像", "imagingPerforation"], ["术中", "perforation_present"], ["病理", "pathologyPerforation"]];
+const sources = [["研究分组", "perforationStatus"], ["影像", "imagingPerforation"], ["术中", "perforation_primary"], ["病理", "pathologyPerforation"]];
   const states = sources.map(([label, key]) => {
     const values = records.map((record) => String(record.appendicitisData?.[key] || "").trim()).filter(isAppendicitisValueFilled);
     if (!values.length) return "";
-    const value = values.includes("明确穿孔") ? "明确穿孔" : values.includes("有") ? "有" : values.includes("疑似穿孔") ? "疑似穿孔" : values.includes("不确定") ? "不确定" : values.includes("未见穿孔") ? "未见穿孔" : values.includes("无") ? "无" : values[values.length - 1];
+    const value = values.includes("明确穿孔") ? "明确穿孔" : values.includes("有") ? "有" : values.includes("是") ? "是" : values.includes("疑似穿孔") ? "疑似穿孔" : values.includes("不确定") ? "不确定" : values.includes("未见穿孔") ? "未见穿孔" : values.includes("无") ? "无" : values.includes("否") ? "否" : values[values.length - 1];
     return `${label}：${value}`;
   }).filter(Boolean);
-  const hasConcern = states.some((item) => item.endsWith("：有") || item.endsWith("：不确定") || item.endsWith("：明确穿孔") || item.endsWith("：疑似穿孔"));
+  const hasConcern = states.some((item) => item.endsWith("：有") || item.endsWith("：是") || item.endsWith("：不确定") || item.endsWith("：明确穿孔") || item.endsWith("：疑似穿孔"));
   return { label: states.join("；") || "未补录", hasConcern };
 }
 
@@ -2451,9 +2548,14 @@ function getStableResearchHash(value) {
 }
 
 function getResearchPatientId(record) {
-  const studyId = String(record?.appendicitisData?.studyId || "").trim();
+  const studyId = String(record?.appendicitisData?.study_id || record?.appendicitisData?.studyId || "").trim();
   if (studyId) return studyId;
   return `CASE-${getStableResearchHash(personKey(record))}`;
+}
+
+function getResearchPatientGroupingKey(record) {
+  const studyId = String(record?.appendicitisData?.study_id || record?.appendicitisData?.studyId || "").trim();
+  return studyId ? `study:${studyId}` : personKey(record);
 }
 
 function getResearchRecordId(record, index) {
@@ -2497,35 +2599,72 @@ function mergeAppendicitisData(target, next = {}) {
 }
 
 function getPatientInclusionStatus(records = []) {
-  const statuses = records.map((record) => getPerforationInclusionStatus(record.appendicitisData));
-  if (statuses.includes("纳入：明确穿孔")) return "纳入：明确穿孔";
-  if (statuses.some((status) => status.startsWith("明确穿孔"))) return "明确穿孔（需补充依据）";
-  if (statuses.some((status) => status.startsWith("不纳入"))) return statuses.find((status) => status.startsWith("不纳入"));
-  return "待判定";
+  const merged = records.reduce((target, record) => mergeAppendicitisData(target, record.appendicitisData), {});
+  return getStudyInclusionStatus(merged);
 }
 
-const APPENDICITIS_PHASE_GROUPS = {
-  preoperative: ["basic", "symptoms", "preoperative", "labs", "imaging"],
-  operative: ["perforationCore", "operative"],
-  postoperative: ["treatment", "outcomes"],
-  adjudication: ["labelAdjudication"],
-};
+const APPENDICITIS_RESEARCH_TABLES = [
+  {
+    key: "patient",
+    name: "患者与纳入信息",
+    sourceGroups: ["basic", "perforationCore", "treatment", "pathology"],
+    fields: ["study_id", "hospital_center", "age", "sex", "heightCm", "weightKg", "bmi", "admission_datetime", "first_acute_appendicitis_episode", "index_episode", "perforationStatus", "laparoscopy_exploration", "laparoscopy_completed", "appendectomy_attempted", "conversion_to_open", "conversion_reason", "pathology_acute_appendicitis_confirmed", "exclusion_reason"],
+  },
+  {
+    key: "preoperativeClinical",
+    name: "术前临床资料",
+    sourceGroups: ["symptoms", "preoperative"],
+    fields: ["age", "sex", "bmi", "preop_timepoint", "preop_assessment_time", "preop_antibiotic_status", "symptom_onset_datetime", "painDurationHours", "right_lower_quadrant_pain", "migratoryPain", "nausea_vomiting", "appetite_loss", "diarrhea", "fever_chills", "right_lower_quadrant_tenderness", "rebound_pain", "guarding", "localized_peritoneal_irritation", "diffuse_peritoneal_irritation", "reboundGuarding", "admissionTempC", "clinicalPeritonitis", "heart_rate", "systolic_bp", "diastolic_bp", "respiratory_rate", "spo2", "antibiotics_before_admission", "analgesics_before_admission"],
+  },
+  {
+    key: "preoperativeLabs",
+    name: "术前实验室指标",
+    sourceGroups: ["labs"],
+    fields: ["lab_timepoint", "lab_collection_time", "lab_collection_status", "wbc", "neutAbs", "neutPct", "lymphAbs", "lymphPct", "monocyteAbs", "monocytePct", "hgb", "plt", "crp", "pct", "albumin", "totalBilirubin", "creatinine", "egfr", "urea", "glucose", "lactate", "fibrinogen", "ast", "alt", "sodium", "potassium", "chloride", "calcium"],
+  },
+  {
+    key: "preoperativeImaging",
+    name: "术前影像资料",
+    sourceGroups: ["imaging"],
+    fields: ["imaging_timepoint", "imaging_exam_time", "imaging_status", "imagingMethod", "appendixDiameterMm", "imagingAppendicolith", "appendicolithSizeMm", "appendix_wall_discontinuity", "fatStranding", "periAppendicealFluid", "free_fluid", "freeGas", "imagingAbscess", "imagingPhlegmon", "imaging_abscess_size_cm", "imagingPerforation", "imaging_perforation_location"],
+  },
+  {
+    key: "operativeWses",
+    name: "术中结局_WSES",
+    sourceGroups: ["perforationCore", "operative", "labelAdjudication", "pathology"],
+    fields: ["perforationStatus", "perforationBasis", "appendix_macroscopic_status", "perforation_primary", "perforation_location", "perforation_type", "necrosis_present", "necrosis_location", "phlegmon_present", "abscess_present", "operative_abscess_size_cm", "peritoneal_extent", "contamination_type", "free_appendicolith", "final_wses_grade", "grade_source", "simpleInflammation", "suppuration", "gangrene", "operativeAppendicolith", "operativePurulentExudate", "suggested_wses_grade", "operative_report_available", "operative_media_available", "unknown_reason", "reviewer_1_grade", "reviewer_2_grade", "final_adjudicated_grade", "reviewer_1_comment", "reviewer_2_comment", "label_adjudication_status", "pathology_acute_appendicitis_confirmed", "pathologyDiagnosis", "pathologyPerforation", "pathologyAppendicolith", "appendixTumor", "pathologyText"],
+  },
+  {
+    key: "postoperative",
+    name: "手术与术后结局",
+    sourceGroups: ["treatment", "outcomes"],
+    fields: ["antibioticTime", "operationStartTime", "treatmentStrategy", "surgeryMethod", "laparoscopy_exploration", "laparoscopy_completed", "appendectomy_attempted", "conversion_to_open", "conversion_reason", "operationDurationMin", "drainagePlaced", "drainageDurationDays", "postoperative_antibiotic_name", "postoperative_antibiotic_duration_days", "icu_admission", "discharge_date", "lengthOfStayDays", "ssi30d", "intraabdominalAbscess30d", "ileusObstruction30d", "readmission30d", "reintervention30d", "death30d", "clavien_dindo_grade", "otherComplication"],
+  },
+];
 
-function getAppendicitisPhaseFields(phase) {
-  const groupKeys = APPENDICITIS_PHASE_GROUPS[phase] || [];
-  return APPENDICITIS_FIELD_DEFS.filter((field) => groupKeys.includes(field.groupKey));
+function getAppendicitisResearchTableDefinition(tableKey) {
+  return APPENDICITIS_RESEARCH_TABLES.find((table) => table.key === tableKey) || APPENDICITIS_RESEARCH_TABLES[0];
 }
 
-function getAppendicitisPhaseRecords(patient, phase) {
-  const fields = getAppendicitisPhaseFields(phase);
-  const phaseTypes = new Set(fields.flatMap((field) => field.groupTypes || []));
-  if (!phaseTypes.size) return patient.records;
-  const matchingRecords = patient.records.filter((record) => phaseTypes.has(record.type));
+function getAppendicitisResearchTableFields(tableKey) {
+  const table = getAppendicitisResearchTableDefinition(tableKey);
+  const fields = new Map(APPENDICITIS_FIELD_DEFS.map((field) => [field.key, field]));
+  return table.fields.map((key) => fields.get(key)).filter(Boolean);
+}
+
+function getAppendicitisResearchSourceRecords(patient, tableKey) {
+  const table = getAppendicitisResearchTableDefinition(tableKey);
+  const sourceTypes = new Set(table.sourceGroups.flatMap((groupKey) => {
+    const group = APPENDICITIS_FIELD_GROUPS.find((candidate) => candidate.key === groupKey);
+    return group?.types || [];
+  }));
+  if (!sourceTypes.size) return patient.records;
+  const matchingRecords = patient.records.filter((record) => sourceTypes.has(record.type));
   return matchingRecords.length ? matchingRecords : patient.records;
 }
 
-function getAppendicitisPhaseSheet(patients, phase) {
-  const fields = getAppendicitisPhaseFields(phase);
+function getAppendicitisResearchTableSheet(patients, tableKey) {
+  const fields = getAppendicitisResearchTableFields(tableKey);
   const headers = [
     "病例ID",
     "姓名/患者",
@@ -2536,7 +2675,7 @@ function getAppendicitisPhaseSheet(patients, phase) {
     ...fields.map((field) => field.key + "｜" + field.label),
   ];
   const rows = patients.map((patient) => {
-    const sourceRecords = getAppendicitisPhaseRecords(patient, phase);
+    const sourceRecords = getAppendicitisResearchSourceRecords(patient, tableKey);
     const representative = getPatientRepresentative(patient.records);
     const dates = sourceRecords
       .map(getResearchRecordDate)
@@ -2556,28 +2695,31 @@ function getAppendicitisPhaseSheet(patients, phase) {
 }
 
 function getAppendicitisFieldDictionary() {
-  const preoperative = new Set(APPENDICITIS_PHASE_GROUPS.preoperative);
-  const operative = new Set(APPENDICITIS_PHASE_GROUPS.operative);
-  const postoperative = new Set(APPENDICITIS_PHASE_GROUPS.postoperative);
+  const memberships = new Map();
+  APPENDICITIS_RESEARCH_TABLES.forEach((table) => {
+    table.fields.forEach((key) => {
+      if (!memberships.has(key)) memberships.set(key, []);
+      memberships.get(key).push(table);
+    });
+  });
   return APPENDICITIS_FIELD_DEFS.map((field) => {
-    const isPreoperative = preoperative.has(field.groupKey);
-    const isOperative = operative.has(field.groupKey);
-    const isPostoperative = postoperative.has(field.groupKey);
-    const phase = isPreoperative ? "preoperative_predictors"
-      : isOperative ? "operative_wses_label"
-        : isPostoperative ? "postoperative_outcomes"
-          : "label_adjudication";
+    const tables = memberships.get(field.key) || [];
+    const tableNames = tables.map((table) => table.name).join("；");
+    const isPreoperative = tables.some((table) => table.key.startsWith("preoperative"));
+    const isOperative = tables.some((table) => table.key === "operativeWses");
+    const isPostoperative = tables.some((table) => table.key === "postoperative");
+    const isAdjudication = field.groupKey === "labelAdjudication";
     return [
       field.key,
       field.label,
-      phase,
+      tableNames,
       field.groupTitle || "",
       field.type || "",
       field.options?.join("；") || "",
       isPreoperative ? "是" : "否",
       isOperative ? "是" : "否",
       isPostoperative ? "是" : "否",
-      (!isPreoperative && !isOperative && !isPostoperative) ? "是" : "否",
+      isAdjudication ? "是" : "否",
     ];
   });
 }
@@ -2592,11 +2734,11 @@ function buildResearchWorkbookRows() {
   const variableMap = new Map();
 
   orderedRecords.forEach((record, index) => {
-    const patientKey = personKey(record);
+    const patientKey = getResearchPatientGroupingKey(record);
     const patientId = getResearchPatientId(record);
     if (!patientMap.has(patientKey)) patientMap.set(patientKey, { patientId, records: [], appendicitisData: {} });
     const patient = patientMap.get(patientKey);
-    if (String(record?.appendicitisData?.studyId || "").trim()) patient.patientId = patientId;
+    if (String(record?.appendicitisData?.study_id || record?.appendicitisData?.studyId || "").trim()) patient.patientId = patientId;
     patient.records.push(record);
     mergeAppendicitisData(patient.appendicitisData, record.appendicitisData);
     const archivePatientId = patient.patientId;
@@ -2611,7 +2753,7 @@ function buildResearchWorkbookRows() {
       record.personId || "",
       reportDate,
       record.type || "",
-      getPerforationInclusionStatus(record.appendicitisData),
+      getStudyInclusionStatus(record.appendicitisData),
       record.title || "",
       record.createdAt ? new Date(Number(record.createdAt)) : "",
       record.ocrEngine || "",
@@ -2637,7 +2779,7 @@ function buildResearchWorkbookRows() {
         record.personId || "",
         reportDate,
         record.type || "",
-        getPerforationInclusionStatus(record.appendicitisData),
+        getStudyInclusionStatus(record.appendicitisData),
         variableCode,
         metric.name || "未命名指标",
         metric.abbreviation || "",
@@ -2694,29 +2836,19 @@ function buildResearchWorkbookRows() {
     ];
   });
   const patients = [...patientMap.values()];
-  const preoperativeSheet = getAppendicitisPhaseSheet(patients, "preoperative");
-  const operativeSheet = getAppendicitisPhaseSheet(patients, "operative");
-  const postoperativeSheet = getAppendicitisPhaseSheet(patients, "postoperative");
-  const adjudicationSheet = getAppendicitisPhaseSheet(patients, "adjudication");
+  const researchSheets = Object.fromEntries(APPENDICITIS_RESEARCH_TABLES.map((table) => [table.key, getAppendicitisResearchTableSheet(patients, table.key)]));
 
   return {
-    patientHeaders: ["病例ID", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "穿孔纳入状态", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
+    patientHeaders: ["病例ID", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "研究纳入状态", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
     patientRows,
-    recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "穿孔纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
+    recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
     recordRows,
-    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "穿孔纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
+    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
     metricRows,
     variableHeaders: ["变量编码", "资料类型", "指标名称", "英文缩写", "数据类型", "单位示例", "参考范围示例", "字段说明", "默认复核状态"],
     variableRows: [...variableMap.values()].sort((first, second) => String(first[0]).localeCompare(String(second[0]), "zh-CN")),
-    preoperativeHeaders: preoperativeSheet.headers,
-    preoperativeRows: preoperativeSheet.rows,
-    operativeHeaders: operativeSheet.headers,
-    operativeRows: operativeSheet.rows,
-    postoperativeHeaders: postoperativeSheet.headers,
-    postoperativeRows: postoperativeSheet.rows,
-    adjudicationHeaders: adjudicationSheet.headers,
-    adjudicationRows: adjudicationSheet.rows,
-    appendicitisFieldHeaders: ["字段编码", "字段名称", "数据分层", "字段分组", "字段类型", "选项", "术前预测变量", "术中WSES标签", "术后结局", "标签复核"],
+    researchSheets,
+    appendicitisFieldHeaders: ["字段编码", "字段名称", "研究数据表", "字段分组", "字段类型", "选项", "是否术前预测变量", "是否术中主要结局", "是否术后结局", "是否标签复核"],
     appendicitisFieldRows: getAppendicitisFieldDictionary(),
   };
 }
@@ -2836,10 +2968,10 @@ function exportClinicalDataPackage() {
   appendResearchSheet(workbook, "资料记录表", data.recordHeaders, data.recordRows, { "报告日期": "yyyy-mm-dd", "采集/归档时间": "yyyy-mm-dd hh:mm", "原图张数": "0", "指标数": "0" });
   appendResearchSheet(workbook, "指标明细表", data.metricHeaders, data.metricRows, { "报告日期": "yyyy-mm-dd", "结果数值": "0.############", "OCR置信度": "0.0%" });
   appendResearchSheet(workbook, "变量字典", data.variableHeaders, data.variableRows);
-  appendResearchSheet(workbook, "术前预测变量", data.preoperativeHeaders, data.preoperativeRows, { "首份相关报告日期": "yyyy-mm-dd" });
-  appendResearchSheet(workbook, "术中WSES标签", data.operativeHeaders, data.operativeRows, { "首份相关报告日期": "yyyy-mm-dd" });
-  appendResearchSheet(workbook, "术后结局", data.postoperativeHeaders, data.postoperativeRows, { "首份相关报告日期": "yyyy-mm-dd" });
-  appendResearchSheet(workbook, "分级复核", data.adjudicationHeaders, data.adjudicationRows, { "首份相关报告日期": "yyyy-mm-dd" });
+  APPENDICITIS_RESEARCH_TABLES.forEach((table) => {
+    const sheet = data.researchSheets[table.key];
+    appendResearchSheet(workbook, table.name, sheet.headers, sheet.rows, { "首份相关报告日期": "yyyy-mm-dd" });
+  });
   appendResearchSheet(workbook, "阑尾炎字段字典", data.appendicitisFieldHeaders, data.appendicitisFieldRows);
   XLSX.writeFile(workbook, `clinical-data-collection-${getLocalDateStamp()}.xlsx`, { bookType: "xlsx", compression: true, cellDates: true });
   showToast(`已导出临床数据包：${data.patientRows.length} 名患者/病例、${data.recordRows.length} 份资料、${data.metricRows.length} 条指标；含术前、术中、术后和复核表`);

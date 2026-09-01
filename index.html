@@ -136,8 +136,8 @@
           <section class="appendicitis-capture" id="appendicitisCapture" aria-labelledby="appendicitisCaptureTitle">
             <div class="appendicitis-capture-head">
               <div>
-                <div class="number-summary-head"><span id="appendicitisCaptureTitle">阑尾炎穿孔病例采集</span><small id="appendicitisDraftStatus">填写即保存草稿</small></div>
-                <p class="collection-hint">本项目仅纳入明确穿孔病例；先选择“明确穿孔”并填写判定依据，再归档。术前预测变量、术中 WSES 标签、术后结局和 Unknown 复核信息分层保存，可在拍照时同步补录。</p>
+                <div class="number-summary-head"><span id="appendicitisCaptureTitle">急性阑尾炎临床数据采集</span><small id="appendicitisDraftStatus">填写即保存草稿</small></div>
+                <p class="collection-hint">纳入所有接受腹腔镜探查并尝试阑尾切除的急性阑尾炎患者（含中转开腹）。study_id 和 index episode 用于避免重复住院号造成数据泄漏；术中 perforation_primary 是主要结局，不是术前资料的替代项。</p>
               </div>
               <div class="collection-toggle-group"><label class="collection-toggle"><input id="appendicitisEnabled" type="checkbox" checked />启用</label><label class="collection-toggle"><input id="continueCaseAfterArchive" type="checkbox" checked />归档后继续此病例</label></div>
             </div>
@@ -316,6 +316,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=35"></script>
+    <script src="./app.js?v=36"></script>
   </body>
 </html>
