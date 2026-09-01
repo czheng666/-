@@ -10,6 +10,7 @@ const state = {
   detectedPersonId: "",
   detectedPersonReason: "",
   summaryManuallyEdited: false,
+  summaryMode: "research",
   paddleOcr: null,
   paddleOcrPromise: null,
   ocrEngine: "",
@@ -62,6 +63,12 @@ const els = {
   processingPercent: $("processingPercent"),
   ocrText: $("ocrText"),
   summaryText: $("summaryText"),
+  summaryMode: $("summaryMode"),
+  summaryModeHint: $("summaryModeHint"),
+  refreshSummaryButton: $("refreshSummaryButton"),
+  copySummaryButton: $("copySummaryButton"),
+  summaryMeta: $("summaryMeta"),
+  summaryEditStatus: $("summaryEditStatus"),
   numberChips: $("numberChips"),
   metricTableWrap: $("metricTableWrap"),
   metricTableBody: $("metricTableBody"),
@@ -76,6 +83,10 @@ const els = {
   filterSelect: $("filterSelect"),
   personFilterSelect: $("personFilterSelect"),
   recordTotal: $("recordTotal"),
+  overviewStats: $("overviewStats"),
+  overviewBody: $("overviewBody"),
+  overviewEmpty: $("overviewEmpty"),
+  copyOverviewButton: $("copyOverviewButton"),
   storageStatus: $("storageStatus"),
   recordList: $("recordList"),
   archiveEmpty: $("archiveEmpty"),
@@ -986,6 +997,80 @@ function buildSummary(text, type) {
   return `${summary || `${type}\n已提取原文，请人工整理检查部位、所见和印象/结论。`}\n\n提示：自动归纳仅整理报告原文，不代表诊断意见。`;
 }
 
+const SUMMARY_MODE_HINTS = {
+  research: "按资料类型、报告时间、异常指标和全部指标生成科研摘要",
+  "all-metrics": "把当前识别到的所有指标按项目、缩写、结果和参考范围列出",
+  "abnormal-metrics": "只突出异常标记或低置信度项目，适合快速复核",
+  imaging: "按检查部位、所见、印象/结论整理影像报告",
+  raw: "保留 OCR 原文中的前部重点行，适合手动二次整理",
+};
+
+function getCurrentSummaryMetrics(text, type) {
+  if (!labFieldRules[type]) return [];
+  const editedRows = getEditableMetricRows();
+  if (state.currentMetrics.length && editedRows.length) return editedRows;
+  return extractAllLabRows(text, state.ocrBlocks);
+}
+
+function formatSummaryMetric(row) {
+  return `${row.name || "未命名指标"}${row.abbreviation ? ` [${row.abbreviation}]` : ""}：${row.value || "未填写"}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}`;
+}
+
+function isMetricForReview(row) {
+  const confidence = Number(row.confidence);
+  return Boolean(String(row.flag || "").trim()) || (String(row.confidence ?? "").trim() !== "" && Number.isFinite(confidence) && confidence < 0.75);
+}
+
+function buildSummaryByMode(text, type, mode = state.summaryMode) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  if (labFieldRules[type]) {
+    const metrics = getCurrentSummaryMetrics(source, type);
+    if (!metrics.length) return buildSummary(source, type);
+    const flagged = metrics.filter(isMetricForReview);
+    const reportDate = typeof getReportDate === "function" ? getReportDate(source) : "";
+    const identity = [els.personName?.value.trim(), els.personId?.value.trim()].filter(Boolean).join(" · ");
+    const contextLine = [identity ? `个人：${identity}` : "", reportDate ? `报告时间：${reportDate}` : "", `指标总数：${metrics.length}`, `异常/待复核：${flagged.length}`].filter(Boolean).join("；");
+    if (mode === "abnormal-metrics") {
+      return `${type}（异常/待复核优先）\n${contextLine}\n\n${flagged.length ? flagged.map(formatSummaryMetric).join("\n") : "未识别到异常标记；仍需对照原图确认全部指标。"}\n\n提示：低置信度项目也会列入待复核，请不要仅凭自动标记判断临床意义。`;
+    }
+    if (mode === "all-metrics") {
+      return `${type}（全部指标清单，共 ${metrics.length} 项）\n${contextLine}\n\n${metrics.map(formatSummaryMetric).join("\n")}\n\n提示：以上为结构化录入结果，请对照原图逐项核对。`;
+    }
+    if (mode === "research") {
+      const flaggedLines = flagged.length ? flagged.map(formatSummaryMetric).join("\n") : "未识别到异常标记";
+      return `${type}（科研摘要）\n${contextLine}\n\n异常/待复核指标：\n${flaggedLines}\n\n全部指标明细：\n${metrics.map(formatSummaryMetric).join("\n")}\n\n提示：摘要仅用于临床资料整理，不代表诊断意见；归档前请完成逐项人工复核。`;
+    }
+  }
+  if (mode === "raw") {
+    const lines = getTextLines(source).filter((line) => line.trim() && !isLabFooter(line)).slice(0, 18);
+    return `${type}（原文重点）\n${lines.join("\n")}\n\n提示：请根据原图补充或修订检查部位、所见和印象/结论。`;
+  }
+  return buildSummary(source, type);
+}
+
+function updateSummaryMeta() {
+  if (!els.summaryMeta || !els.summaryEditStatus) return;
+  const text = els.summaryText?.value || "";
+  const metrics = labFieldRules[els.recordType?.value] ? getCurrentSummaryMetrics(els.ocrText?.value || "", els.recordType.value).length : 0;
+  els.summaryMeta.textContent = text ? `${text.length} 字${metrics ? ` · ${metrics} 项指标` : ""}` : "等待识别内容";
+  els.summaryEditStatus.textContent = state.summaryManuallyEdited ? "已手动修改 · 自动更新已暂停" : "模板自动生成";
+}
+
+function refreshSummary({ force = false, silent = false } = {}) {
+  if (!force && state.summaryManuallyEdited) { updateSummaryMeta(); return; }
+  const text = els.ocrText?.value.trim() || "";
+  if (!text) {
+    els.summaryText.value = "";
+    updateSummaryMeta();
+    return;
+  }
+  els.summaryText.value = buildSummaryByMode(text, els.recordType.value, state.summaryMode);
+  state.summaryManuallyEdited = false;
+  updateSummaryMeta();
+  if (!silent) showToast(`已按“${els.summaryMode?.selectedOptions?.[0]?.textContent || "科研摘要"}”重建归纳`);
+}
+
 function updateSmartResult(text, autoApply = true) {
   const detection = detectDocumentType(`${els.recordTitle.value}\n${text}`);
   state.detectedType = detection.type;
@@ -994,8 +1079,9 @@ function updateSmartResult(text, autoApply = true) {
   els.detectedReason.textContent = detection.reason;
   els.applyDetectedTypeButton.disabled = !detection.type;
   if (autoApply && detection.confident) els.recordType.value = detection.type;
-  if (!state.summaryManuallyEdited) els.summaryText.value = buildSummary(text, els.recordType.value);
   renderMetricTable(text, els.recordType.value);
+  if (!state.summaryManuallyEdited) refreshSummary({ force: true, silent: true });
+  else updateSummaryMeta();
 }
 
 function updatePersonDetection(text, autoApply = true) {
@@ -1746,18 +1832,88 @@ function renderPersonFilter() {
   els.personFilterSelect.value = people.has(current) ? current : "全部";
 }
 
-function renderRecords() {
+function getVisibleRecords() {
   const query = els.searchInput.value.trim().toLowerCase();
   const filter = els.filterSelect.value;
   renderPersonFilter();
   const selectedPerson = els.personFilterSelect.value;
-  const records = state.records.filter((record) => {
+  return state.records.filter((record) => {
     const matchesFilter = filter === "全部" || record.type === filter;
     const matchesPerson = selectedPerson === "全部" || personKey(record) === selectedPerson;
     const searchable = `${record.title} ${record.type} ${record.note} ${record.text} ${record.summary || ""} ${(record.numbers || []).join(" ")}`.toLowerCase();
     const personSearchable = `${record.personName || ""} ${record.personId || ""}`.toLowerCase();
     return matchesFilter && matchesPerson && (!query || searchable.includes(query) || personSearchable.includes(query));
   });
+}
+
+function formatOverviewDate(record) {
+  const value = getResearchRecordDate(record);
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return "未识别";
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function getPatientOverviewRows(records) {
+  const groups = new Map();
+  records.forEach((record) => {
+    const key = personKey(record);
+    if (!groups.has(key)) groups.set(key, { key, person: record, records: [] });
+    groups.get(key).records.push(record);
+  });
+  return [...groups.values()].map((group) => {
+    const dates = group.records.map((record) => ({ value: getResearchRecordDate(record), label: formatOverviewDate(record) }))
+      .filter((item) => item.value instanceof Date && !Number.isNaN(item.value.getTime()))
+      .sort((first, second) => first.value.getTime() - second.value.getTime());
+    const metrics = group.records.flatMap((record) => getResearchMetrics(record).filter(isMetricForReview));
+    const issueLabels = [...new Set(metrics.map((metric) => `${metric.abbreviation || metric.name || "指标"} ${metric.value || ""}${metric.flag ? ` ${metric.flag}` : ""}`.trim()).filter(Boolean))];
+    const hasPendingReview = group.records.some((record) => record.reviewStatus !== "人工已复核");
+    const typeLabels = [...new Set(group.records.map((record) => record.type).filter(Boolean))];
+    const firstDate = dates[0]?.label || "未识别";
+    const lastDate = dates[dates.length - 1]?.label || firstDate;
+    return {
+      key: group.key,
+      label: personLabel(group.person),
+      personId: group.records.find((record) => record.personId)?.personId || "",
+      count: group.records.length,
+      types: typeLabels.join("、") || "未分类",
+      dateRange: firstDate === lastDate ? firstDate : `${firstDate} 至 ${lastDate}`,
+      issues: issueLabels,
+      hasPendingReview,
+    };
+  }).sort((first, second) => String(first.label).localeCompare(String(second.label), "zh-CN"));
+}
+
+function renderArchiveOverview(records) {
+  if (!els.overviewStats || !els.overviewBody || !els.overviewEmpty) return;
+  const rows = getPatientOverviewRows(records);
+  const metricCount = records.reduce((total, record) => total + getResearchMetrics(record).length, 0);
+  const issueCount = rows.reduce((total, row) => total + row.issues.length, 0);
+  const pendingCount = records.filter((record) => record.reviewStatus !== "人工已复核").length;
+  els.overviewStats.innerHTML = [
+    `<span><strong>${rows.length}</strong> 名个人/病例</span>`,
+    `<span><strong>${records.length}</strong> 份资料</span>`,
+    `<span><strong>${metricCount}</strong> 项指标</span>`,
+    `<span class="overview-stat-warning"><strong>${issueCount}</strong> 项异常/待复核</span>`,
+    pendingCount ? `<span class="overview-stat-warning"><strong>${pendingCount}</strong> 份未完成复核</span>` : "",
+  ].filter(Boolean).join("");
+  els.overviewBody.innerHTML = rows.map((row) => {
+    const issues = row.issues.length ? `${row.issues.slice(0, 3).map(escapeHtml).join("；")}${row.issues.length > 3 ? ` 等 ${row.issues.length} 项` : ""}` : (row.hasPendingReview ? "待完成人工复核" : "未发现异常标记");
+    return `<tr><td><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.personId || "未填写病案/就诊号")}</small></td><td>${row.count} 份</td><td>${escapeHtml(row.types)}</td><td>${escapeHtml(row.dateRange)}</td><td class="${row.issues.length || row.hasPendingReview ? "overview-issue" : "overview-ok"}">${issues}</td><td><button class="button button-ghost overview-person-button" type="button" data-overview-person="${escapeHtml(row.key)}">查看此人</button></td></tr>`;
+  }).join("");
+  els.overviewEmpty.hidden = rows.length > 0;
+  els.overviewBody.parentElement.parentElement.hidden = rows.length === 0;
+}
+
+function buildOverviewText(records) {
+  const rows = getPatientOverviewRows(records);
+  if (!rows.length) return "";
+  const header = ["个人/病例", "病案/就诊号", "资料数", "资料类型", "报告时间", "异常/待复核"].join("\t");
+  const body = rows.map((row) => [row.label, row.personId, row.count, row.types, row.dateRange, row.issues.join("；") || (row.hasPendingReview ? "待复核" : "未发现异常标记")].join("\t"));
+  return [header, ...body].join("\n");
+}
+
+function renderRecords() {
+  const records = getVisibleRecords();
+  renderArchiveOverview(records);
   els.recordTotal.textContent = `${state.records.length} 条`;
   const groups = new Map();
   records.forEach((record) => {
@@ -1824,15 +1980,35 @@ function openRecord(id) {
   else els.recordDialog.setAttribute("open", "true");
 }
 
+async function copyTextToClipboard(text, successMessage = "已复制") {
+  const value = String(text || "").trim();
+  if (!value) { showToast("当前没有可复制的归纳内容", "error"); return false; }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const helper = document.createElement("textarea");
+      helper.value = value;
+      helper.setAttribute("readonly", "true");
+      helper.style.position = "fixed";
+      helper.style.opacity = "0";
+      document.body.appendChild(helper);
+      helper.select();
+      document.execCommand("copy");
+      helper.remove();
+    }
+    showToast(successMessage);
+    return true;
+  } catch {
+    showToast("当前浏览器不允许自动复制，请手动选择文字复制", "error");
+    return false;
+  }
+}
+
 async function copyCurrentSummary() {
   const record = state.records.find((item) => item.id === state.editingRecordId);
   if (!record?.summary) return;
-  try {
-    await navigator.clipboard.writeText(record.summary);
-    showToast("归档总结已复制，可粘贴到病程记录或其他文档");
-  } catch {
-    showToast("当前浏览器不允许自动复制，请长按选择总结文字", "error");
-  }
+  await copyTextToClipboard(record.summary, "归档总结已复制，可粘贴到病程记录或其他文档");
 }
 
 async function deleteCurrentRecord() {
@@ -2175,7 +2351,7 @@ function exportClinicalDataPackage() {
 
 function exportRecordsJson() {
   if (!state.records.length) { showToast("当前没有可导出的资料", "error"); return; }
-  const payload = { exportedAt: new Date().toISOString(), app: "临床采集 / v0.2", records: state.records };
+  const payload = { exportedAt: new Date().toISOString(), app: "临床采集 / v0.3", records: state.records };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   downloadBlob(blob, `clinical-capture-${getLocalDateStamp()}.json`);
   showToast("已导出本机档案 JSON 备份");
@@ -2201,19 +2377,26 @@ els.metricTableBody.addEventListener("input", (event) => {
   }
   if (els.reviewConfirmed) els.reviewConfirmed.checked = false;
   if (!state.summaryManuallyEdited) {
-    els.summaryText.value = buildSummaryFromMetrics(els.recordType.value, state.currentMetrics);
+    refreshSummary({ force: true, silent: true });
   }
 });
 els.ocrText.addEventListener("input", () => { state.ocrText = els.ocrText.value; state.ocrEdited = state.ocrText !== state.ocrOriginalText; if (els.reviewConfirmed) els.reviewConfirmed.checked = false; updateSmartResult(state.ocrText, true); updatePersonDetection(state.ocrText, true); renderNumbers(state.ocrText); });
 els.personName.addEventListener("input", () => { if (els.personName.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; });
 els.personId.addEventListener("input", () => { if (els.personId.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; });
-els.summaryText.addEventListener("input", () => { state.summaryManuallyEdited = true; });
+els.summaryText.addEventListener("input", () => { state.summaryManuallyEdited = true; updateSummaryMeta(); });
+els.summaryMode.addEventListener("change", () => {
+  state.summaryMode = els.summaryMode.value;
+  if (els.summaryModeHint) els.summaryModeHint.textContent = SUMMARY_MODE_HINTS[state.summaryMode] || SUMMARY_MODE_HINTS.research;
+  refreshSummary({ force: true, silent: false });
+});
+els.refreshSummaryButton.addEventListener("click", () => refreshSummary({ force: true, silent: false }));
+els.copySummaryButton.addEventListener("click", () => copyTextToClipboard(els.summaryText.value.trim(), "已复制当前归纳，可粘贴到科研记录或表格"));
 els.applyDetectedTypeButton.addEventListener("click", () => {
   if (!state.detectedType) return;
   els.recordType.value = state.detectedType;
   state.summaryManuallyEdited = false;
-  els.summaryText.value = buildSummary(els.ocrText.value, state.detectedType);
   renderMetricTable(els.ocrText.value, state.detectedType);
+  refreshSummary({ force: true, silent: true });
   showToast(`已应用资料类型：${state.detectedType}`);
 });
 els.applyDetectedPersonButton.addEventListener("click", () => {
@@ -2226,8 +2409,9 @@ els.recordType.addEventListener("change", () => {
   updateAppendicitisFormContext();
   scheduleCaptureDraftSave();
   if (els.ocrText.value.trim()) {
-    if (!state.summaryManuallyEdited) els.summaryText.value = buildSummary(els.ocrText.value, els.recordType.value);
     renderMetricTable(els.ocrText.value, els.recordType.value);
+    if (!state.summaryManuallyEdited) refreshSummary({ force: true, silent: true });
+    else updateSummaryMeta();
     applyAutoAppendicitisFields(els.ocrText.value, els.recordType.value);
   }
 });
@@ -2235,6 +2419,14 @@ els.archiveButton.addEventListener("click", archiveCurrent);
 els.searchInput.addEventListener("input", renderRecords);
 els.filterSelect.addEventListener("change", renderRecords);
 els.personFilterSelect.addEventListener("change", renderRecords);
+els.overviewBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-overview-person]");
+  if (!button) return;
+  els.personFilterSelect.value = button.dataset.overviewPerson || "全部";
+  renderRecords();
+  els.recordList.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+els.copyOverviewButton.addEventListener("click", () => copyTextToClipboard(buildOverviewText(getVisibleRecords()), "已复制当前个人汇总，可粘贴到 Excel"));
 els.recordList.addEventListener("click", (event) => { const card = event.target.closest(".record-card"); if (card) openRecord(card.dataset.id); });
 els.recordList.addEventListener("keydown", (event) => { if (event.key === "Enter") { const card = event.target.closest(".record-card"); if (card) openRecord(card.dataset.id); } });
 els.exportButton.addEventListener("click", exportClinicalDataPackage);

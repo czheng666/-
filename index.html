@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=24" />
+    <link rel="stylesheet" href="./styles.css?v=25" />
     <title>临床采集 · OCR 归档</title>
     <script type="importmap">
       {
@@ -196,10 +196,27 @@
               </div>
               <button class="button button-secondary" id="applyDetectedPersonButton" type="button" disabled>应用个人</button>
             </div>
-            <label class="field">
-              <span>自动归纳 <small>基于 OCR 文本整理，可修改</small></span>
-              <textarea id="summaryText" rows="6" placeholder="识别完成后会生成结构化归纳…"></textarea>
-            </label>
+            <section class="summary-panel" aria-labelledby="summary-panel-title">
+              <div class="summary-panel-head">
+                <div>
+                  <span class="summary-panel-title" id="summary-panel-title">自动归纳</span>
+                  <small id="summaryModeHint">基于 OCR 文本和结构化指标生成，可修改</small>
+                </div>
+                <div class="summary-panel-actions">
+                  <label class="summary-mode-picker"><span>模板</span><select id="summaryMode" aria-label="选择归纳模板">
+                    <option value="research">科研摘要</option>
+                    <option value="all-metrics">全部指标清单</option>
+                    <option value="abnormal-metrics">异常/待复核优先</option>
+                    <option value="imaging">影像三段式</option>
+                    <option value="raw">原文重点</option>
+                  </select></label>
+                  <button class="button button-secondary summary-action-button" id="refreshSummaryButton" type="button">重建归纳</button>
+                  <button class="button button-ghost summary-action-button" id="copySummaryButton" type="button">复制</button>
+                </div>
+              </div>
+              <textarea id="summaryText" rows="7" placeholder="识别完成后会生成结构化归纳…"></textarea>
+              <div class="summary-panel-foot"><small id="summaryMeta">等待识别内容</small><small id="summaryEditStatus">自动更新中</small></div>
+            </section>
             <div class="number-summary" id="numberSummary">
               <div class="number-summary-head"><span>识别到的数字</span><small>自动提取，可编辑</small></div>
               <div class="number-chips" id="numberChips"><span class="muted-chip">暂无数字</span></div>
@@ -257,6 +274,18 @@
             <span>数据仅保存在当前浏览器；换设备前请先导出 JSON 备份。</span>
             <small id="storageStatus">正在读取本机存储状态…</small>
           </div>
+          <section class="archive-overview" aria-labelledby="overview-title">
+            <div class="overview-head">
+              <div>
+                <div class="number-summary-head"><span id="overview-title">按个人科研汇总</span><small>当前筛选结果 · 一人一行</small></div>
+                <p class="overview-hint">用于快速查看每个人收集了哪些资料、时间范围和异常/待复核指标；导出按钮可生成完整 Excel 数据包。</p>
+              </div>
+              <button class="button button-secondary" id="copyOverviewButton" type="button">复制当前汇总</button>
+            </div>
+            <div class="overview-stats" id="overviewStats"></div>
+            <div class="overview-table-wrap"><table class="overview-table"><thead><tr><th>个人/病例</th><th>资料</th><th>类型</th><th>报告时间</th><th>异常/待复核</th><th>操作</th></tr></thead><tbody id="overviewBody"></tbody></table></div>
+            <div class="overview-empty" id="overviewEmpty">当前筛选范围内暂无可汇总资料</div>
+          </section>
           <div class="record-list" id="recordList"></div>
           <div class="archive-empty" id="archiveEmpty">
             <div class="empty-folder">▱</div>
@@ -267,7 +296,7 @@
       </main>
 
       <footer class="app-footer">
-        <span>临床采集 / v0.2 本机科研采集版</span>
+        <span>临床采集 / v0.3 本机科研采集版</span>
         <span>本工具不替代医疗记录系统，请在归档前人工核对 OCR 结果。</span>
       </footer>
     </div>
@@ -287,6 +316,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=30"></script>
+    <script src="./app.js?v=31"></script>
   </body>
 </html>
