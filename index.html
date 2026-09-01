@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=26" />
+    <link rel="stylesheet" href="./styles.css?v=27" />
     <title>临床采集 · OCR 归档</title>
     <script type="importmap">
       {
@@ -137,7 +137,7 @@
             <div class="appendicitis-capture-head">
               <div>
                 <div class="number-summary-head"><span id="appendicitisCaptureTitle">阑尾炎穿孔病例采集</span><small id="appendicitisDraftStatus">填写即保存草稿</small></div>
-                <p class="collection-hint">本项目仅纳入明确穿孔病例；先选择“明确穿孔”并填写判定依据，再归档。症状、时间和术中所见可在拍照时同步补录。</p>
+                <p class="collection-hint">本项目仅纳入明确穿孔病例；先选择“明确穿孔”并填写判定依据，再归档。术前预测变量、术中 WSES 标签、术后结局和 Unknown 复核信息分层保存，可在拍照时同步补录。</p>
               </div>
               <div class="collection-toggle-group"><label class="collection-toggle"><input id="appendicitisEnabled" type="checkbox" checked />启用</label><label class="collection-toggle"><input id="continueCaseAfterArchive" type="checkbox" checked />归档后继续此病例</label></div>
             </div>
@@ -316,6 +316,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=34"></script>
+    <script src="./app.js?v=35"></script>
   </body>
 </html>
