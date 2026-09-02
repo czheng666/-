@@ -1967,6 +1967,189 @@ function detectBrightDocumentCrop(image) {
   return reduction > 0.06 ? crop : null;
 }
 
+function getOpenCv() {
+  const candidate = window.cv;
+  return candidate && typeof candidate.imread === "function" && typeof candidate.findContours === "function" && typeof candidate.warpPerspective === "function"
+    ? candidate
+    : null;
+}
+
+function distanceBetweenPoints(first, second) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function polygonArea(points) {
+  return Math.abs(points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + (point.x * next.y) - (next.x * point.y);
+  }, 0) / 2);
+}
+
+function orderQuadrilateral(points) {
+  if (!Array.isArray(points) || points.length !== 4) return null;
+  const bySum = [...points].sort((first, second) => (first.x + first.y) - (second.x + second.y));
+  const byDiff = [...points].sort((first, second) => (first.x - first.y) - (second.x - second.y));
+  const ordered = [bySum[0], byDiff[3], bySum[3], byDiff[0]];
+  const unique = new Set(ordered.map((point) => `${point.x},${point.y}`));
+  return unique.size === 4 ? ordered : null;
+}
+
+function detectDocumentQuadrilateral(image) {
+  const cv = getOpenCv();
+  if (!cv) return null;
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const previewWidth = Math.min(1200, sourceWidth);
+  const previewHeight = Math.max(1, Math.round(sourceHeight * previewWidth / sourceWidth));
+  const previewCanvas = document.createElement("canvas");
+  previewCanvas.width = previewWidth;
+  previewCanvas.height = previewHeight;
+  const context = previewCanvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, previewWidth, previewHeight);
+  let source;
+  let gray;
+  let blurred;
+  let edges;
+  let contours;
+  let hierarchy;
+  try {
+    source = cv.imread(previewCanvas);
+    gray = new cv.Mat();
+    blurred = new cv.Mat();
+    edges = new cv.Mat();
+    cv.cvtColor(source, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+    cv.Canny(blurred, edges, 45, 140);
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    const imageArea = previewWidth * previewHeight;
+    let best = null;
+    for (let index = 0; index < contours.size(); index += 1) {
+      const contour = contours.get(index);
+      let approx;
+      try {
+        const perimeter = cv.arcLength(contour, true);
+        approx = new cv.Mat();
+        cv.approxPolyDP(contour, approx, Math.max(2, perimeter * 0.025), true);
+        if (approx.rows !== 4) continue;
+        const area = Math.abs(cv.contourArea(approx));
+        if (area < imageArea * 0.28 || area > imageArea * 0.99) continue;
+        const values = Array.from(approx.data32S || approx.data32F || []);
+        if (values.length < 8) continue;
+        const points = orderQuadrilateral([0, 1, 2, 3].map((pointIndex) => ({ x: values[pointIndex * 2], y: values[(pointIndex * 2) + 1] })));
+        if (!points) continue;
+        const width = Math.max(distanceBetweenPoints(points[0], points[1]), distanceBetweenPoints(points[3], points[2]));
+        const height = Math.max(distanceBetweenPoints(points[0], points[3]), distanceBetweenPoints(points[1], points[2]));
+        if (width < previewWidth * 0.40 || height < previewHeight * 0.25 || width / Math.max(1, height) > 8) continue;
+        const score = area * Math.min(1, (width * height) / Math.max(1, area));
+        if (!best || score > best.score) best = { points, score };
+      } finally {
+        approx?.delete();
+        contour.delete();
+      }
+    }
+    if (!best) return null;
+    const scaleX = sourceWidth / previewWidth;
+    const scaleY = sourceHeight / previewHeight;
+    return {
+      points: best.points.map((point) => ({ x: point.x * scaleX, y: point.y * scaleY })),
+      sourceWidth,
+      sourceHeight,
+    };
+  } catch {
+    return null;
+  } finally {
+    source?.delete();
+    gray?.delete();
+    blurred?.delete();
+    edges?.delete();
+    contours?.delete();
+    hierarchy?.delete();
+  }
+}
+
+function invertHomography(matrix) {
+  if (!Array.isArray(matrix) || matrix.length < 9) return null;
+  const [a, b, c, d, e, f, g, h, i] = matrix;
+  const determinant = (a * ((e * i) - (f * h))) - (b * ((d * i) - (f * g))) + (c * ((d * h) - (e * g)));
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-8) return null;
+  return [
+    ((e * i) - (f * h)) / determinant, ((c * h) - (b * i)) / determinant, ((b * f) - (c * e)) / determinant,
+    ((f * g) - (d * i)) / determinant, ((a * i) - (c * g)) / determinant, ((c * d) - (a * f)) / determinant,
+    ((d * h) - (e * g)) / determinant, ((b * g) - (a * h)) / determinant, ((a * e) - (b * d)) / determinant,
+  ];
+}
+
+function applyHomography(matrix, point) {
+  const denominator = (matrix[6] * point.x) + (matrix[7] * point.y) + matrix[8];
+  if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-8) return point;
+  return {
+    x: ((matrix[0] * point.x) + (matrix[1] * point.y) + matrix[2]) / denominator,
+    y: ((matrix[3] * point.x) + (matrix[4] * point.y) + matrix[5]) / denominator,
+  };
+}
+
+async function createRectifiedOcrVariant(image, page) {
+  const cv = getOpenCv();
+  const detected = detectDocumentQuadrilateral(image);
+  if (!cv || !detected) return null;
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const longestSide = Math.max(sourceWidth, sourceHeight);
+  const workScale = Math.min(3600, Math.max(2200, longestSide)) / longestSide;
+  const workWidth = Math.max(1, Math.round(sourceWidth * workScale));
+  const workHeight = Math.max(1, Math.round(sourceHeight * workScale));
+  const workCanvas = document.createElement("canvas");
+  workCanvas.width = workWidth;
+  workCanvas.height = workHeight;
+  const workContext = workCanvas.getContext("2d", { willReadFrequently: true });
+  workContext.imageSmoothingEnabled = true;
+  workContext.imageSmoothingQuality = "high";
+  workContext.drawImage(image, 0, 0, workWidth, workHeight);
+  const sourcePoints = detected.points.map((point) => ({ x: point.x * workScale, y: point.y * workScale }));
+  const targetWidth = Math.max(1, Math.round(Math.max(distanceBetweenPoints(sourcePoints[0], sourcePoints[1]), distanceBetweenPoints(sourcePoints[3], sourcePoints[2]))));
+  const targetHeight = Math.max(1, Math.round(Math.max(distanceBetweenPoints(sourcePoints[0], sourcePoints[3]), distanceBetweenPoints(sourcePoints[1], sourcePoints[2]))));
+  const outputScale = Math.min(1, 3400 / Math.max(targetWidth, targetHeight));
+  const outputWidth = Math.max(1, Math.round(targetWidth * outputScale));
+  const outputHeight = Math.max(1, Math.round(targetHeight * outputScale));
+  let sourceMat;
+  let sourcePointsMat;
+  let targetPointsMat;
+  let transform;
+  let warped;
+  try {
+    sourceMat = cv.imread(workCanvas);
+    sourcePointsMat = cv.matFromArray(4, 1, cv.CV_32FC2, sourcePoints.flatMap((point) => [point.x, point.y]));
+    targetPointsMat = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, outputWidth, 0, outputWidth, outputHeight, 0, outputHeight]);
+    transform = cv.getPerspectiveTransform(sourcePointsMat, targetPointsMat);
+    warped = new cv.Mat();
+    cv.warpPerspective(sourceMat, warped, transform, new cv.Size(outputWidth, outputHeight), cv.INTER_CUBIC, cv.BORDER_REPLICATE, new cv.Scalar());
+    const outputCanvas = document.createElement("canvas");
+    cv.imshow(outputCanvas, warped);
+    return {
+      dataUrl: outputCanvas.toDataURL("image/jpeg", 0.97),
+      page,
+      label: "自动透视矫正·报告页",
+      priority: 13,
+      crop: { x: 0, y: 0, width: sourceWidth, height: sourceHeight },
+      scaleX: outputWidth / sourceWidth,
+      scaleY: outputHeight / sourceHeight,
+      sourceWidth,
+      sourceHeight,
+      contentCrop: { x: 0, y: 0, width: sourceWidth, height: sourceHeight },
+      inverseHomography: invertHomography(Array.from(transform.data64F || transform.data32F || [])),
+      transformWorkScale: workScale,
+    };
+  } finally {
+    sourceMat?.delete();
+    sourcePointsMat?.delete();
+    targetPointsMat?.delete();
+    transform?.delete();
+    warped?.delete();
+  }
+}
+
 async function createOcrVariant(image, crop, label, priority, page, enhancement = "contrast") {
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
@@ -2004,9 +2187,12 @@ async function getOcrVariants(dataUrl, page, { includeBase = true, includeFocuse
   // 先找报告页的亮区域，避免把手机状态栏、浏览器工具栏和显示器黑边送进 OCR。
   const reportCrop = detectBrightDocumentCrop(image);
   const content = reportCrop || detectContentCrop(image) || full;
+  let rectified = null;
+  try { rectified = await createRectifiedOcrVariant(image, page); } catch {}
   const variants = [];
   if (includeBase) {
-    variants.push(await createOcrVariant(image, full, "整图·去屏闪", 0, page, "screen"));
+    if (rectified) variants.push(rectified);
+    else variants.push(await createOcrVariant(image, full, "整图·去屏闪", 0, page, "screen"));
     if (reportCrop) variants.push(await createOcrVariant(image, reportCrop, "报告页·去边框", 3, page, "screen"));
   }
   const headerHeight = Math.max(1, content.height * 0.42);
@@ -2093,10 +2279,13 @@ function mergeOcrBlocks(blocks = []) {
 }
 
 function mapOcrItemToSource(item, variant) {
-  const poly = Array.isArray(item.poly) ? item.poly.map((point) => [
-    variant.crop.x + (point[0] / variant.scaleX),
-    variant.crop.y + (point[1] / variant.scaleY),
-  ]) : [];
+  const poly = Array.isArray(item.poly) ? item.poly.map((point) => {
+    if (variant.inverseHomography) {
+      const sourcePoint = applyHomography(variant.inverseHomography, { x: point[0], y: point[1] });
+      return [sourcePoint.x / Math.max(0.0001, variant.transformWorkScale || 1), sourcePoint.y / Math.max(0.0001, variant.transformWorkScale || 1)];
+    }
+    return [variant.crop.x + (point[0] / variant.scaleX), variant.crop.y + (point[1] / variant.scaleY)];
+  }) : [];
   return { ...item, poly, page: variant.page, variant: variant.label, variantPriority: variant.priority, contentCrop: variant.contentCrop };
 }
 
