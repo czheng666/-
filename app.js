@@ -997,6 +997,46 @@ function detectDocumentType(text) {
   return { type: best.type, confident: best.score >= 1, reason };
 }
 
+function normalizeClinicalOcrText(text) {
+  // 只修复本院病历中反复出现、且不会改变数字的明显字形/空格误读；原始 OCR 仍单独保留。
+  return String(text || "")
+    .replace(/&#x20;|&#32;/gi, " ")
+    .replace(/手\s*术\s*记\s*(?:录|承|承)/g, "手术记录")
+    .replace(/术\s*(?:导|中)\s*诊\s*断/g, "术中诊断")
+    .replace(/急性\s*(?:闲|阐|閑|间|閱)\s*(?:讨|尾)\s*炎/g, "急性阑尾炎")
+    .replace(/(?:闲|阐|閑)\s*(?:讨|尾)/g, "阑尾")
+    .replace(/腹\s*(?:腔|腕)\s*(?:镜|锁)\s*(?:阑|闲|阐|羡)\s*(?:尾|讨)\s*切除\s*(?:术|林)?/g, "腹腔镜阑尾切除术")
+    .replace(/麻\s*(?:风|竖|肯|王)(?=\s*(?:护|医|前|用|中|记录|药))/g, "麻醉")
+    .replace(/穿\s*(?:制|茜)\s*孔/g, "穿刺孔")
+    .replace(/腹\s*腔\s*镜\s*直\s*视\s*下/g, "腹腔镜直视下");
+}
+
+function scoreOcrCandidate(text, blocks = []) {
+  const source = String(text || "");
+  const compact = source.replace(/\s/g, "");
+  if (!compact) return -10;
+  const chineseCount = (compact.match(/[\u4e00-\u9fff]/g) || []).length;
+  const digitCount = (compact.match(/\d/g) || []).length;
+  const longLatinNoise = (source.match(/\b[A-Z]{6,}\b/g) || []).length;
+  const symbols = (compact.match(/[\\|<>^_=+~`@$%&]/g) || []).length;
+  const clinicalTerms = ["姓名", "住院号", "病案号", "病历号", "手术记录", "术前诊断", "术中诊断", "阑尾", "腹腔镜", "穿孔", "脓液", "脓性", "腹膜炎", "手术步骤", "病理诊断", "切除"].filter((term) => compact.includes(term)).length;
+  const identity = detectPerson(source, blocks);
+  return Math.min(5, chineseCount / 80) + Math.min(1.2, digitCount / 20) + (clinicalTerms * 0.55)
+    + (identity.name ? 1.8 : 0) + (identity.personId ? 1.8 : 0)
+    + Math.min(1.2, (Array.isArray(blocks) ? blocks.length : 0) / 80)
+    - (longLatinNoise * 1.35) - Math.min(1.5, symbols / 30);
+}
+
+function shouldCompareAlternativeOcr(text, blocks = []) {
+  const source = String(text || "");
+  const compact = source.replace(/\s/g, "");
+  const longLatinNoise = (source.match(/\b[A-Z]{6,}\b/g) || []).length;
+  const identity = detectPerson(source, blocks);
+  return longLatinNoise >= 2
+    || compact.length < 180
+    || (!identity.name && !identity.personId && compact.length > 100);
+}
+
 function normalizeIdentityLabels(text) {
   return String(text || "")
     .replace(/姓\s*[·•.。]?\s*[名各]/g, "姓名")
@@ -2389,6 +2429,16 @@ function mapOcrItemToSource(item, variant) {
   return { ...item, poly, page: variant.page, variant: variant.label, variantPriority: variant.priority, contentCrop: variant.contentCrop };
 }
 
+function isLikelyGibberishBlock(block) {
+  const text = String(block?.text || "").trim();
+  const compact = text.replace(/[\s\u3000]/g, "").toUpperCase();
+  if (compact.length < 8 || /[\u4e00-\u9fff\d]/.test(compact)) return false;
+  if (!/^[A-Z][A-Z .,'’'()\-/]+$/.test(compact)) return false;
+  const allowed = ["ULTRASOUND", "REPORT", "HOSPITAL", "PATIENT", "NAME", "DATE", "SURGERY", "OPERATION", "ANESTHESIA", "CLINICAL", "DIAGNOSIS", "WBC", "HGB", "PLT", "NEUT", "LYMPH", "MONO", "BASO", "RBC", "ALT", "AST", "CRP", "CT", "MRI", "ECG"];
+  if (allowed.some((term) => compact === term || compact.includes(term))) return false;
+  return Number(block.score || 0) < 0.72 || compact.length >= 12;
+}
+
 function buildOcrTextFromBlocks(blocks) {
   const lines = groupOcrBlocksIntoLines(blocks);
   let currentPage = null;
@@ -2489,7 +2539,10 @@ async function loadPaddleOcrModule() {
 function filterPaddleBlocks(results) {
   const rawBlocks = [];
   results.forEach(({ result, variant }) => {
-    (result.items || []).forEach((item) => rawBlocks.push(mapOcrItemToSource(item, variant)));
+    (result.items || []).forEach((item) => {
+      const mapped = mapOcrItemToSource(item, variant);
+      if (!isLikelyGibberishBlock(mapped)) rawBlocks.push(mapped);
+    });
   });
   return mergeOcrBlocks(rawBlocks).filter((block) => {
     const crop = block.contentCrop;
@@ -2829,7 +2882,7 @@ async function recognizeImages() {
     ? "本次固定使用 Tesseract.js，不会切换到其他引擎"
     : selectedEngine === "paddle"
       ? "本次固定使用 PaddleOCR PP-OCRv6 small，失败后会显示错误"
-      : "自动模式：优先 PaddleOCR PP-OCRv6 small，失败后使用 Tesseract.js";
+      : "自动模式：优先 PaddleOCR；拍屏乱码时自动对比备用 OCR";
   els.archiveButton.disabled = true;
   els.reRecognizeButton.disabled = true;
   if (els.reviewConfirmed) els.reviewConfirmed.checked = false;
@@ -2849,9 +2902,24 @@ async function recognizeImages() {
     } else {
       try {
         const paddleResult = await recognizeWithPaddle();
-        combined = paddleResult.text;
-        state.ocrBlocks = paddleResult.blocks;
-      state.ocrEngine = "PaddleOCR PP-OCRv6 small";
+        let selectedResult = paddleResult;
+        let selectedEngine = "PaddleOCR PP-OCRv6 small";
+        // Paddle 初始化成功不等于这张拍屏图片识别质量足够；出现长串拉丁乱码或完全没有身份信息时，自动对比备用引擎。
+        if (window.Tesseract && shouldCompareAlternativeOcr(paddleResult.text, paddleResult.blocks)) {
+          els.processingDetail.textContent = "当前结果疑似拍屏乱码，正在用备用引擎做一次质量对比…";
+          try {
+            const tesseractResult = await recognizeWithTesseract();
+            if (scoreOcrCandidate(tesseractResult.text, tesseractResult.blocks) > scoreOcrCandidate(paddleResult.text, paddleResult.blocks) + 0.25) {
+              selectedResult = tesseractResult;
+              selectedEngine = "Tesseract.js（低质量自动复核）";
+            }
+          } catch (fallbackError) {
+            console.warn("Automatic Tesseract quality comparison skipped.", fallbackError);
+          }
+        }
+        combined = selectedResult.text;
+        state.ocrBlocks = selectedResult.blocks;
+        state.ocrEngine = selectedEngine;
       } catch (paddleError) {
         console.warn("PaddleOCR initialization or recognition failed; using Tesseract fallback.", paddleError);
         const tesseractResult = await recognizeWithTesseract();
@@ -2861,8 +2929,10 @@ async function recognizeImages() {
         showToast("PaddleOCR 未能初始化，已自动切换 Tesseract.js；可改为固定引擎继续对比", "error");
       }
     }
+    const rawCombined = combined;
+    combined = normalizeClinicalOcrText(combined);
     state.ocrText = combined;
-    state.ocrOriginalText = combined;
+    state.ocrOriginalText = rawCombined;
     state.ocrEdited = false;
     els.ocrText.value = combined;
     state.summaryManuallyEdited = false;
