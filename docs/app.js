@@ -22,6 +22,8 @@ const state = {
   ocrError: "",
   ocrBusy: false,
   currentMetrics: [],
+  metricSourceRows: [],
+  batchAudit: null,
   appendicitisData: {},
 };
 
@@ -61,6 +63,9 @@ const els = {
   detectedPerson: $("detectedPerson"),
   detectedPersonReason: $("detectedPersonReason"),
   applyDetectedPersonButton: $("applyDetectedPersonButton"),
+  qualitySummary: $("qualitySummary"),
+  qualitySummaryTitle: $("qualitySummaryTitle"),
+  qualitySummaryDetail: $("qualitySummaryDetail"),
   processingBar: $("processingBar"),
   processingTitle: $("processingTitle"),
   processingDetail: $("processingDetail"),
@@ -131,7 +136,68 @@ function escapeHtml(value = "") {
 }
 
 const CAPTURE_DRAFT_KEY = "clinical-capture-draft-v2";
+const HOSPITAL_CORRECTIONS_KEY = "clinical-hospital-corrections-v1";
 const APPENDICITIS_MISSING_VALUES = new Set(["", "未填写", "未记录", "未描述", "未检查"]);
+
+function getHospitalCorrections() {
+  try {
+    const value = JSON.parse(localStorage.getItem(HOSPITAL_CORRECTIONS_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHospitalCorrections(corrections) {
+  try { localStorage.setItem(HOSPITAL_CORRECTIONS_KEY, JSON.stringify(corrections.slice(-300))); } catch {}
+}
+
+function normalizeCorrectionKey(value) {
+  return String(value || "").normalize("NFKC").replace(/[\s\u3000]/g, "").toUpperCase();
+}
+
+function findHospitalCorrection(rawAbbreviation, name = "", unit = "", recordType = "") {
+  const rawKey = normalizeCorrectionKey(rawAbbreviation);
+  const nameKey = normalizeCorrectionKey(name);
+  const unitKey = normalizeCorrectionKey(unit);
+  if (!rawKey) return "";
+  const candidates = getHospitalCorrections().filter((item) => {
+    if (normalizeCorrectionKey(item.raw) !== rawKey) return false;
+    if (item.nameKey && nameKey && normalizeCorrectionKey(item.nameKey) !== nameKey) return false;
+    if (item.unitKey && unitKey && normalizeCorrectionKey(item.unitKey) !== unitKey) return false;
+    if (item.recordType && recordType && item.recordType !== recordType) return false;
+    return true;
+  });
+  return candidates.sort((first, second) => Number(second.updatedAt || 0) - Number(first.updatedAt || 0))[0]?.canonical || "";
+}
+
+function rememberMetricCorrections(sourceRows = [], nextRows = [], recordType = "") {
+  const corrections = getHospitalCorrections();
+  let changed = false;
+  nextRows.forEach((row, index) => {
+    const source = sourceRows[index] || {};
+    const raw = String(source.abbreviation || "").trim();
+    const canonical = String(row.abbreviation || "").trim();
+    if (!raw || !canonical || normalizeCorrectionKey(raw) === normalizeCorrectionKey(canonical)) return;
+    const entry = {
+      raw,
+      canonical,
+      nameKey: normalizeLabMetricName(row.name || source.name || ""),
+      unitKey: normalizeLabUnit(row.unit || source.unit || ""),
+      recordType,
+      updatedAt: Date.now(),
+    };
+    const existing = corrections.find((item) => normalizeCorrectionKey(item.raw) === normalizeCorrectionKey(raw)
+      && normalizeCorrectionKey(item.nameKey) === normalizeCorrectionKey(entry.nameKey)
+      && normalizeCorrectionKey(item.unitKey) === normalizeCorrectionKey(entry.unitKey)
+      && (item.recordType || "") === recordType);
+    if (existing) Object.assign(existing, entry);
+    else corrections.push(entry);
+    changed = true;
+  });
+  if (changed) saveHospitalCorrections(corrections);
+  return changed;
+}
 
 function renderAppendicitisForm() {
   if (!els.appendicitisForm) return;
@@ -220,6 +286,7 @@ function updateAppendicitisProgress() {
   state.appendicitisData = data;
   const suggestedGrade = getSuggestedWsesGrade(data);
   const suggestedGradeInput = els.appendicitisForm?.querySelector('[data-appendicitis-field="suggested_wses_grade"]');
+  const machineBasisInput = els.appendicitisForm?.querySelector('[data-appendicitis-field="machine_grade_basis"]');
   const adjudicationStatusInput = els.appendicitisForm?.querySelector('[data-appendicitis-field="label_adjudication_status"]');
   const machineSuggestionStillEditable = suggestedGradeInput && !suggestedGradeInput.dataset.manuallyEdited
     && (!adjudicationStatusInput?.value || adjudicationStatusInput.value === "机器建议待确认");
@@ -236,6 +303,11 @@ function updateAppendicitisProgress() {
   if (machineSuggestionStillEditable && !suggestedGrade && adjudicationStatusInput?.value === "机器建议待确认") {
     adjudicationStatusInput.value = "";
     data.label_adjudication_status = "";
+    state.appendicitisData = data;
+  }
+  if (suggestedGrade && machineBasisInput && !machineBasisInput.value.trim()) {
+    machineBasisInput.value = state.ocrEngine && state.ocrOriginalText ? "术中记录OCR" : "手工录入术中字段";
+    data.machine_grade_basis = machineBasisInput.value;
     state.appendicitisData = data;
   }
   const total = APPENDICITIS_FIELD_DEFS.length;
@@ -531,6 +603,7 @@ function normalizeAppendicitisData(data = {}) {
     const legacyValue = legacyKeys.map((key) => normalized[key]).find(isAppendicitisValueFilled);
     if (isAppendicitisValueFilled(legacyValue)) normalized[canonical] = legacyValue;
   });
+  if (isAppendicitisValueFilled(normalized.suggested_wses_grade) && !isAppendicitisValueFilled(normalized.machine_grade_algorithm_version)) normalized.machine_grade_algorithm_version = "WSES-rule-v1";
   return normalized;
 }
 
@@ -543,7 +616,20 @@ function normalizeRecord(record) {
     summary: record.summary || "",
     ocrEdited: Boolean(record.ocrEdited),
     ocrOriginalText: record.ocrOriginalText || record.text || "",
-    metrics: Array.isArray(record.metrics) ? record.metrics : [],
+    studyIdOrigin: record.studyIdOrigin || "",
+    batchAudit: record.batchAudit && typeof record.batchAudit === "object" ? record.batchAudit : null,
+    metrics: Array.isArray(record.metrics) ? record.metrics.map((metric) => ({
+      ...metric,
+      rawName: metric.rawName || metric.name || "",
+      rawAbbreviation: metric.rawAbbreviation || metric.abbreviation || "",
+      rawValue: metric.rawValue || metric.value || "",
+      rawReference: metric.rawReference || metric.reference || "",
+      rawUnit: metric.rawUnit || metric.unit || "",
+      rawFlag: metric.rawFlag || metric.flag || "",
+      sourcePage: metric.sourcePage || "",
+      sourceBox: metric.sourceBox || "",
+      sourceText: metric.sourceText || "",
+    })) : [],
     numbers: Array.isArray(record.numbers) ? record.numbers : [],
     images: Array.isArray(record.images) ? record.images.filter((image) => typeof image === "string" && image.startsWith("data:image/")) : [],
     createdAt: Number.isFinite(Number(record.createdAt)) ? Number(record.createdAt) : Date.now(),
@@ -830,7 +916,7 @@ const APPENDICITIS_FIELD_GROUPS = [
       { key: "contamination_type", label: "腹腔污染性质", type: "select", options: ["无", "清亮", "脓性", "粪性", "混合", "未检查", "未记录", "未描述", "不确定"] },
       { key: "perforation_type", label: "穿孔类型", type: "select", options: ["无", "局限/包裹性", "游离性", "未描述", "不确定"] },
       { key: "free_appendicolith", label: "游离粪石", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
-      { key: "final_wses_grade", label: "最终WSES分级（术中结局）", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
+      { key: "final_wses_grade", label: "原记录明确的WSES分级（可选）", type: "select", options: WSES_GRADE_OPTIONS, advanced: true },
       { key: "grade_source", label: "WSES分级依据来源", type: "select", options: ["手术记录", "腹腔镜视频/照片", "CT报告", "病理报告", "多来源复核", "其他", "未记录"], advanced: true },
       { key: "simpleInflammation", label: "充血/单纯炎症", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
       { key: "suppuration", label: "化脓", type: "select", options: APPENDICITIS_VALUE_OPTIONS },
@@ -842,11 +928,12 @@ const APPENDICITIS_FIELD_GROUPS = [
   {
     key: "labelAdjudication",
     title: "WSES分级复核与Unknown组",
-    hint: "视频/照片通常不可获取时，机器根据手术记录OCR和已录入的术中所见自动给出WSES建议；机器建议可用于初步归档，但要保留输入来源和复核状态。按 0、1、2A、2B、3A、3B（脓肿＜4 cm）、3C（脓肿＞4 cm）、4、5 记录；只写“穿孔”或“腹膜炎”或脓肿恰为4 cm时，保留Unknown原因。",
+    hint: "视频/照片不可获取时，机器根据手术记录OCR和已录入的术中所见给出WSES默认分级；无法唯一判断时保留“未判定”，不要把未描述当作无。按 0、1、2A、2B、3A、3B（脓肿＜4 cm）、3C（脓肿＞4 cm）、4、5 记录；只写“穿孔”或“腹膜炎”或脓肿恰为4 cm时，保留Unknown原因。",
     types: ["手术记录", "CT", "彩超", "住院病历", "出院小结"],
     fields: [
-      { key: "suggested_wses_grade", label: "机器WSES分级建议（无视频/照片时依据术中记录）", type: "select", options: WSES_GRADE_OPTIONS },
+      { key: "suggested_wses_grade", label: "机器WSES分级（默认归档值）", type: "select", options: WSES_GRADE_OPTIONS },
       { key: "machine_grade_basis", label: "机器分级输入来源", type: "select", options: ["术中记录OCR", "手工录入术中字段", "术中记录OCR+手工修订", "未记录"], advanced: true },
+      { key: "machine_grade_algorithm_version", label: "机器分级规则版本", type: "text", defaultValue: "WSES-rule-v1", advanced: true },
       { key: "operative_report_available", label: "手术记录是否可获取", type: "select", options: ["有", "无", "部分/不完整", "未核实"], advanced: true },
       { key: "operative_media_available", label: "腹腔镜视频/照片是否可获取（默认无）", type: "select", options: ["有", "无", "未核实", "不适用"], defaultValue: "无", advanced: true },
       { key: "unknown_reason", label: "Unknown原因", type: "textarea", placeholder: "如：只写腹膜炎，未说明局限/弥漫；缺少手术记录；脓肿大小未报告", advanced: true },
@@ -963,11 +1050,12 @@ function findLabeledValue(text, labels, valuePattern) {
       const index = line.toLowerCase().indexOf(label.toLowerCase());
       if (index < 0) continue;
       const tail = line.slice(index + label.length).replace(/^[\s:：#№No号-]+/i, "");
-      const match = tail.match(valuePattern);
+      const compactTail = tail.replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, "$1").replace(/(?<=\d)\s+(?=\d)/g, "");
+      const match = tail.match(valuePattern) || compactTail.match(valuePattern);
       if (match?.[0]) return match[0].trim();
       const nextLine = lines[lineIndex + 1] || "";
       if (!tail && nextLine && !labelOnlyLine.test(nextLine)) {
-        const nextMatch = nextLine.match(valuePattern);
+        const nextMatch = nextLine.match(valuePattern) || nextLine.replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, "$1").replace(/(?<=\d)\s+(?=\d)/g, "").match(valuePattern);
         if (nextMatch?.[0]) return nextMatch[0].trim();
       }
     }
@@ -1030,6 +1118,72 @@ function detectPerson(text, blocks = []) {
   };
 }
 
+function getOcrPageTextMap(text = "") {
+  const source = String(text || "");
+  const matches = [...source.matchAll(/【\s*第\s*(\d+)\s*张图片\s*】/g)];
+  if (!matches.length) return new Map([[0, source]]);
+  const pages = new Map();
+  matches.forEach((match, index) => {
+    const page = Math.max(0, Number(match[1]) - 1);
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index ?? source.length) : source.length;
+    pages.set(page, source.slice(start, end).trim());
+  });
+  return pages;
+}
+
+function getBatchIdentityAudit(text = "", blocks = []) {
+  const usableBlocks = state.ocrEdited ? [] : (Array.isArray(blocks) ? blocks : []);
+  const detectedPages = usableBlocks.map((block) => Number(block.page)).filter(Number.isFinite);
+  const pageCount = Math.max(1, state.images.length, detectedPages.length ? Math.max(...detectedPages) + 1 : 0);
+  const pageTextMap = getOcrPageTextMap(text);
+  const pages = [];
+  for (let page = 0; page < pageCount; page += 1) {
+    const pageBlocks = usableBlocks.filter((block) => Number(block.page) === page);
+    const pageText = pageBlocks.length ? buildOcrTextFromBlocks(pageBlocks) : pageTextMap.get(page) || (page === 0 && !pageTextMap.size ? String(text || "") : "");
+    const identity = detectPerson(pageText, pageBlocks);
+    const type = detectDocumentType(pageText);
+    const metricCount = labFieldRules[type.type] ? extractAllLabRows(pageText, pageBlocks, type.type).length : 0;
+    pages.push({ page: page + 1, name: identity.name, personId: identity.personId, type: type.confident ? type.type : "", metricCount });
+  }
+  const uniqueNames = [...new Map(pages.filter((page) => page.name).map((page) => [normalizeIdentityToken(page.name), page.name])).values()];
+  const uniqueIds = [...new Map(pages.filter((page) => page.personId).map((page) => [normalizeIdentityToken(page.personId), page.personId])).values()];
+  const uniqueTypes = [...new Set(pages.map((page) => page.type).filter(Boolean))];
+  return {
+    pageCount,
+    pages,
+    names: uniqueNames,
+    personIds: uniqueIds,
+    types: uniqueTypes,
+    identityConflict: uniqueNames.length > 1 || uniqueIds.length > 1,
+    mixedTypes: uniqueTypes.length > 1,
+    pagesWithIdentity: pages.filter((page) => page.name || page.personId).length,
+    totalMetrics: pages.reduce((sum, page) => sum + page.metricCount, 0),
+  };
+}
+
+function renderQualitySummary(text = els.ocrText?.value || "") {
+  if (!els.qualitySummary) return;
+  if (!text.trim() && !state.images.length) {
+    els.qualitySummary.hidden = true;
+    state.batchAudit = null;
+    return;
+  }
+  const audit = getBatchIdentityAudit(text, state.ocrBlocks);
+  state.batchAudit = audit;
+  const manualIdentity = Boolean(els.personName?.value.trim() || els.personId?.value.trim());
+  const issues = [];
+  if (audit.identityConflict) issues.push(`跨页身份不一致：${audit.names.join("、") || ""}${audit.personIds.length ? ` / ${audit.personIds.join("、")}` : ""}`);
+  if (audit.mixedTypes) issues.push(`同批次包含多种资料类型：${audit.types.join("、")}，建议分开归档`);
+  if (!audit.pagesWithIdentity && !manualIdentity) issues.push("尚未确认患者姓名或病案/就诊号");
+  const stateName = issues.length ? "warning" : "ok";
+  els.qualitySummary.hidden = false;
+  els.qualitySummary.dataset.state = stateName;
+  els.qualitySummaryTitle.textContent = issues.length ? "需要处理批次质控提示" : "批次质控通过，可继续校对";
+  const learnedCount = getHospitalCorrections().length;
+  els.qualitySummaryDetail.textContent = `${audit.pageCount} 张图片 · ${audit.pagesWithIdentity}/${audit.pageCount} 页读到身份 · ${audit.types.length ? audit.types.join("、") : "类型待确认"} · ${audit.totalMetrics || 0} 条表格指标 · 本院校正 ${learnedCount} 条${issues.length ? `；${issues.join("；")}` : "；未发现跨页身份冲突"}`;
+}
+
 function getTextLines(text) {
   return text.split(/\r?\n/).map((line) => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean);
 }
@@ -1040,7 +1194,9 @@ function groupOcrBlocksIntoLines(blocks = []) {
   const items = usable.map((block) => {
     const xs = block.poly.map((point) => point[0]);
     const ys = block.poly.map((point) => point[1]);
-    return { text: block.text.trim(), score: Number(block.score ?? 0), page: Number(block.page ?? 0), variantPriority: Number(block.variantPriority ?? 0), x: Math.min(...xs), y: (Math.min(...ys) + Math.max(...ys)) / 2, height: Math.max(...ys) - Math.min(...ys) };
+    const x = Math.min(...xs);
+    const right = Math.max(...xs);
+    return { text: block.text.trim(), score: Number(block.score ?? 0), page: Number(block.page ?? 0), variantPriority: Number(block.variantPriority ?? 0), x, right, width: right - x, centerX: (x + right) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, height: Math.max(...ys) - Math.min(...ys), poly: block.poly };
   }).sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
   const medianHeight = [...items].sort((a, b) => a.height - b.height)[Math.floor(items.length / 2)]?.height || 18;
   const tolerance = Math.max(8, medianHeight * 0.65);
@@ -1141,8 +1297,11 @@ function normalizeLabMetricName(name) {
     .replace(/：/g, ":");
 }
 
-function normalizeLabAbbreviation(abbreviation, name = "") {
-  const compact = String(abbreviation || "").replace(/[ \t]+/g, "").toUpperCase().replace(/^E0(?=[%#]?)/, "EO");
+function normalizeLabAbbreviation(abbreviation, name = "", unit = "", recordType = "") {
+  const rawCompact = String(abbreviation || "").replace(/[ \t]+/g, "").toUpperCase();
+  const learned = findHospitalCorrection(rawCompact, name, unit, recordType);
+  if (learned) return learned;
+  const compact = rawCompact.replace(/^E0(?=[%#]?)/, "EO");
   const normalizedName = normalizeLabMetricName(name);
   if (/^EO[%#]{2}$/.test(compact) || /^EO[%#]$/.test(compact) && /嗜酸性粒细胞/.test(normalizedName)) {
     if (/绝对数|#/.test(normalizedName)) return "EO#";
@@ -1161,7 +1320,7 @@ function normalizeLabLine(line) {
     .replace(/(\d)\s*([.,])\s*(\d)/g, "$1$2$3")
     .replace(/([\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])/g, "$1")
     .replace(/哮(?=(?:中|酸|碱))/g, "嗜")
-    .replace(/\bE\s*0\s*%?/gi, "EO%")
+    .replace(/\bE\s*0\s*([%#])?/gi, (_, marker) => `EO${marker || ""}`)
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1180,7 +1339,65 @@ function getLabNumberMatches(text) {
   }));
 }
 
-function parseLabLine(line, score = 0) {
+function getLineSourceBox(line) {
+  const points = (line?.items || []).flatMap((item) => Array.isArray(item.poly) ? item.poly : []);
+  if (!points.length) return "";
+  const xs = points.map((point) => Number(point[0])).filter(Number.isFinite);
+  const ys = points.map((point) => Number(point[1])).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return "";
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return [x, y, Math.max(...xs) - x, Math.max(...ys) - y].map((value) => Math.round(value)).join(",");
+}
+
+function isLikelyLabAbbreviation(value) {
+  const compact = String(value || "").replace(/[\s:：]/g, "").toUpperCase().replace(/^E0(?=[%#]?)/, "EO");
+  const generic = /^[A-Z][A-Z0-9./-]{0,15}(?:[%#]{1,2})?$/.test(compact)
+    && !/^(?:NO|NAME|MRN|ID|CT|US)$/.test(compact);
+  const known = /^(?:WBC|RBC|HGB|HB|PLT|NEUT|LYMPH|LYM|MONO|EO|E0|BASO|EOS|MCV|MCH|MCHC|RDW|PCT|PDW|MPV|FIB|PT|INR|APTT|TT|ALT|AST|ALP|GGT|CREA|CR|BUN|UREA|UA|TBIL|DBIL|IBIL|ALB|TP|GLO)(?:[%#]|-[A-Z]+)?$/.test(compact);
+  return generic || known;
+}
+
+function parseStructuredLabLine(line, score = 0, recordType = "") {
+  const items = (line?.items || []).slice().sort((first, second) => first.x - second.x);
+  if (items.length < 3 || isLabHeader(line?.text || "") || isLabFooter(line?.text || "")) return null;
+  const tokens = items.map((item) => normalizeLabLine(item.text));
+  const abbreviationIndex = tokens.findIndex((token) => isLikelyLabAbbreviation(token));
+  if (abbreviationIndex <= 0) return null;
+  const rawName = tokens.slice(0, abbreviationIndex).join("");
+  if (!rawName || /^(?:项目|英文缩写|结果|异常提示|参考范围|参考值|单位)/.test(rawName)) return null;
+  const rawAbbreviation = tokens[abbreviationIndex].replace(/[\s:：]/g, "");
+  const afterAbbreviation = normalizeLabLine(tokens.slice(abbreviationIndex + 1).join(" "));
+  const firstNumber = getLabNumberMatches(afterAbbreviation)[0];
+  if (!firstNumber) return null;
+  const afterValue = afterAbbreviation.slice(firstNumber.index + firstNumber.value.length).trim();
+  const referenceMatch = afterValue.match(/(\d+(?:[.,]\d+)?\s*(?:-|~|～|至)\s*\d+(?:[.,]\d+)?|<\s*\d+(?:[.,]\d+)?|>\s*\d+(?:[.,]\d+)?)/);
+  const rawUnit = afterValue.match(LAB_UNIT_PATTERN)?.[0] || "";
+  const name = normalizeLabMetricName(rawName);
+  const unit = normalizeLabUnit(rawUnit, name);
+  const flagSource = tokens.slice(abbreviationIndex + 1).join(" ");
+  const rawFlag = flagSource.match(/(?:\bHH\b|\bLL\b|\bH\b|\bL\b|↑+|↓+|←|→|高|低|异常|危急|阳性|阴性)/i)?.[0] || "";
+  const flag = rawFlag || inferLabFlag(firstNumber.value, referenceMatch?.[1] || "");
+  return {
+    name,
+    abbreviation: normalizeLabAbbreviation(rawAbbreviation, name, unit, recordType),
+    value: firstNumber.value,
+    unit,
+    reference: referenceMatch?.[1] || "",
+    flag,
+    confidence: score,
+    rawName,
+    rawAbbreviation,
+    rawValue: firstNumber.value,
+    rawReference: referenceMatch?.[1] || "",
+    rawUnit,
+    rawFlag,
+    sourceText: line.text || tokens.join(" "),
+    sourceBox: getLineSourceBox(line),
+  };
+}
+
+function parseLabLine(line, score = 0, recordType = "") {
   const normalized = normalizeLabLine(line);
   if (!normalized || isLabHeader(normalized) || isLabFooter(normalized)) return null;
   const numbers = getLabNumberMatches(normalized);
@@ -1192,18 +1409,18 @@ function parseLabLine(line, score = 0) {
   const abbreviation = beforeValue.match(/(?:^|\s)([A-Za-z][A-Za-z0-9./-]{0,15}(?:[%#])?)(?=\s|$)\s*$/)?.[1] || "";
   const rawName = abbreviation ? beforeValue.slice(0, beforeValue.lastIndexOf(abbreviation)).trim() : beforeValue;
   const name = normalizeLabMetricName(rawName);
-  const canonicalAbbreviation = normalizeLabAbbreviation(abbreviation, name);
   const rawUnit = afterValue.match(LAB_UNIT_PATTERN)?.[0] || "";
   const unit = normalizeLabUnit(rawUnit, name) || (/百分比/.test(name) && /(?:多|％)/.test(afterValue) ? "%" : "");
+  const canonicalAbbreviation = normalizeLabAbbreviation(abbreviation, name, unit, recordType);
   const flagSource = normalized.replace(new RegExp(LAB_UNIT_PATTERN.source, "gi"), " ");
   const rawFlag = flagSource.match(/(?:\bHH\b|\bLL\b|\bH\b|\bL\b|↑+|↓+|←|→|高|低|异常|危急|阳性|阴性)/i)?.[0] || "";
   const inferredFlag = inferLabFlag(first.value, referenceMatch?.[1] || "");
   const flag = rawFlag === "←" || rawFlag === "→" ? (inferredFlag || `${rawFlag}（疑似异常符号）`) : rawFlag || inferredFlag;
   if (!name || name.length > 80) return null;
-  return { name, abbreviation: canonicalAbbreviation, value: first.value, unit: unit.trim(), reference: referenceMatch?.[1] || "", flag, confidence: score };
+  return { name, abbreviation: canonicalAbbreviation, value: first.value, unit: unit.trim(), reference: referenceMatch?.[1] || "", flag, confidence: score, rawName, rawAbbreviation: abbreviation, rawValue: first.value, rawReference: referenceMatch?.[1] || "", rawUnit, rawFlag, sourceText: normalized };
 }
 
-function parseMergedLabLine(line, score = 0) {
+function parseMergedLabLine(line, score = 0, recordType = "") {
   const normalized = normalizeLabLine(line);
   if (!normalized || isLabHeader(normalized) || isLabFooter(normalized)) return null;
   const firstNumberIndex = getLabNumberMatches(normalized)[0]?.index ?? -1;
@@ -1227,36 +1444,65 @@ function parseMergedLabLine(line, score = 0) {
     const unit = unitMatches[index] || unitMatches[0] || "";
     return {
       name: normalizeLabMetricName(name),
-      abbreviation: normalizeLabAbbreviation(abbreviations[index][0], name),
+      abbreviation: normalizeLabAbbreviation(abbreviations[index][0], name, unit, recordType),
       value,
       unit,
       reference,
       flag: inferLabFlag(value, reference),
       confidence: score,
+      rawName: name,
+      rawAbbreviation: abbreviations[index][0],
+      rawValue: value,
+      rawReference: reference,
+      rawUnit: unit,
+      sourceText: normalized,
     };
   });
 }
 
-function extractAllLabRows(text, blocks = []) {
+function extractAllLabRows(text, blocks = [], recordType = els.recordType?.value || "") {
   const lines = getLabLines(text, blocks);
-  const headerIndex = lines.findIndex((line) => isLabHeader(line.text));
-  const candidates = headerIndex >= 0 ? lines.slice(headerIndex + 1) : lines;
+  const hasGeometry = lines.some((line) => line.items?.length);
+  const candidates = [];
+  let tableStarted = false;
+  lines.forEach((line) => {
+    if (isLabHeader(line.text)) {
+      tableStarted = true;
+      return;
+    }
+    if (isLabFooter(line.text)) return;
+    if (!hasGeometry || tableStarted) candidates.push(line);
+  });
+  if (hasGeometry && !tableStarted) candidates.push(...lines);
   const rows = [];
   for (const line of candidates) {
-    if (isLabFooter(line.text)) continue;
-    const parsedRows = parseMergedLabLine(line.text, line.score) || [parseLabLine(line.text, line.score)].filter(Boolean);
+    const structured = parseStructuredLabLine(line, line.score, recordType);
+    const parsedRows = structured
+      ? [structured]
+      : parseMergedLabLine(line.text, line.score, recordType)
+        || [parseLabLine(line.text, line.score, recordType)].filter(Boolean);
     const sourcePage = Number.isFinite(Number(line.page)) ? Number(line.page) + 1 : "";
     for (const parsed of parsedRows) {
-      const next = parsed ? { ...parsed, sourcePage } : null;
-      if (next && !rows.some((row) => row.name === next.name && row.value === next.value && row.sourcePage === next.sourcePage)) rows.push(next);
+      const next = parsed ? { ...parsed, sourcePage, sourceBox: parsed.sourceBox || getLineSourceBox(line), sourceText: parsed.sourceText || line.text } : null;
+      if (next && !rows.some((row) => row.name === next.name && row.abbreviation === next.abbreviation && row.value === next.value && row.sourcePage === next.sourcePage)) rows.push(next);
     }
   }
   return rows;
 }
 
 function renderMetricTable(text, type) {
-  const rows = labFieldRules[type] ? extractAllLabRows(text, state.ocrBlocks) : [];
-  state.currentMetrics = rows.map((row) => ({ ...row }));
+  const rows = labFieldRules[type] ? extractAllLabRows(text, state.ocrBlocks, type) : [];
+  const sourceRows = rows.map((row) => ({
+    ...row,
+    rawName: row.rawName || row.name || "",
+    rawAbbreviation: row.rawAbbreviation || row.abbreviation || "",
+    rawValue: row.rawValue || row.value || "",
+    rawReference: row.rawReference || row.reference || "",
+    rawUnit: row.rawUnit || row.unit || "",
+    rawFlag: row.rawFlag || row.flag || "",
+  }));
+  state.currentMetrics = sourceRows.map((row) => ({ ...row }));
+  state.metricSourceRows = sourceRows.map((row) => ({ ...row }));
   els.metricTableWrap.hidden = !rows.length;
   els.metricTableBody.innerHTML = rows.map((row, index) => {
     const hasConfidence = Number.isFinite(row.confidence);
@@ -1273,12 +1519,20 @@ function getEditableMetricRows() {
   const tableRows = [...els.metricTableBody.querySelectorAll("tr")];
   return tableRows.map((tableRow, index) => {
     const original = state.currentMetrics[index] || {};
+    const source = state.metricSourceRows[index] || original;
     const next = { ...original };
     tableRow.querySelectorAll("[data-metric-field]").forEach((input) => {
       next[input.dataset.metricField] = input.value.trim();
     });
     next.name = normalizeLabMetricName(next.name);
-    next.abbreviation = normalizeLabAbbreviation(next.abbreviation, next.name);
+    next.abbreviation = normalizeLabAbbreviation(next.abbreviation, next.name, next.unit, els.recordType?.value || "");
+    const editableFields = ["name", "abbreviation", "value", "reference", "unit", "flag"];
+    const editedFields = editableFields.filter((field) => String(next[field] || "") !== String(source[field] || ""));
+    if (editedFields.length) {
+      next.manualEdited = true;
+      next.editedFields = editedFields;
+      next.reviewStatus = "人工修改待确认";
+    }
     return next;
   }).filter((row) => row.name || row.value || row.abbreviation);
 }
@@ -1455,6 +1709,7 @@ function updatePersonDetection(text, autoApply = true) {
     if (!els.personId.value.trim() && detection.personId) els.personId.value = detection.personId;
     syncAutoStudyId();
   }
+  renderQualitySummary(text);
 }
 
 function fileToDataUrl(file) {
@@ -2059,6 +2314,8 @@ function resetCapture({ preserveCase = false } = {}) {
   state.ocrOriginalText = "";
   state.ocrError = "";
   state.currentMetrics = [];
+  state.metricSourceRows = [];
+  state.batchAudit = null;
   state.appendicitisData = {};
   els.personName.value = "";
   els.personId.value = "";
@@ -2079,6 +2336,10 @@ function resetCapture({ preserveCase = false } = {}) {
   els.detectedPerson.textContent = "等待识别个人";
   els.detectedPersonReason.textContent = "将从姓名、住院号、门诊号或病案号中提取个人信息";
   els.applyDetectedPersonButton.disabled = true;
+  if (els.qualitySummary) {
+    els.qualitySummary.hidden = true;
+    els.qualitySummary.dataset.state = "ok";
+  }
   setOcrEditor(false);
   setOcrStatus("待处理");
   renderPreviews();
@@ -2203,6 +2464,23 @@ function getStudyInclusionStatus(data = {}) {
   return "纳入研究队列｜主要结局待补录";
 }
 
+function getStudyIdOrigin(data = {}, personName = "", personId = "") {
+  const studyId = String(data.study_id || "").trim();
+  if (!studyId) return "未设置";
+  const idGenerated = `CASE-${getStableResearchHash(`id:${normalizeIdentityToken(personId)}`)}`;
+  const nameGenerated = `CASE-${getStableResearchHash(`name:${normalizeIdentityToken(personName)}`)}`;
+  if (personId && studyId === idGenerated) return "由病案/就诊号自动生成";
+  if (!personId && personName && studyId === nameGenerated) return "由姓名自动生成（缺少编号，需确认）";
+  return "人工研究编号";
+}
+
+function getPatientIdentityQuality(patient) {
+  const ids = [...new Set(patient.records.map((record) => normalizeIdentityToken(record.personId)).filter(Boolean))];
+  if (ids.length > 1) return "身份冲突";
+  if (ids.length === 1) return "病案/就诊号匹配";
+  return patient.records.some((record) => record.personName) ? "仅姓名匹配，建议补编号" : "待确认身份";
+}
+
 function focusResearchInclusion() {
   if (els.appendicitisEnabled) els.appendicitisEnabled.checked = true;
   if (els.appendicitisCapture) els.appendicitisCapture.hidden = false;
@@ -2232,6 +2510,17 @@ async function archiveCurrent() {
     updatePatientMatchHint();
     return;
   }
+  const batchAudit = getBatchIdentityAudit(text, state.ocrBlocks);
+  if (batchAudit.identityConflict) {
+    showToast("检测到多张图片中的姓名或编号不一致，请先拆分资料或核对患者身份", "error");
+    renderQualitySummary(text);
+    return;
+  }
+  if (batchAudit.mixedTypes) {
+    showToast(`同一批图片包含${batchAudit.types.join("、")}，请按同一份资料分批识别归档`, "error");
+    renderQualitySummary(text);
+    return;
+  }
   syncAutoStudyId();
   const appendicitisData = getAppendicitisDataFromForm();
   const inclusion = validateStudyInclusion(appendicitisData);
@@ -2257,6 +2546,8 @@ async function archiveCurrent() {
     summary,
     detectedType: state.detectedType,
     ocrEngine: state.ocrEngine,
+    studyIdOrigin: getStudyIdOrigin(appendicitisData, personName, personId),
+    batchAudit,
     metrics,
     numbers: getRecordNumbers(text),
     images: state.images.map((image) => image.dataUrl),
@@ -2557,9 +2848,11 @@ function renderSavedMetrics(metrics = []) {
     const hasConfidence = Number.isFinite(metric.confidence);
     const confidence = hasConfidence ? `${Math.round(metric.confidence * 100)}%` : "未提供";
     const confidenceClass = !hasConfidence || metric.confidence < 0.6 ? "low-confidence" : metric.confidence < 0.8 ? "medium-confidence" : "";
-    return `<tr><td>${escapeHtml(metric.name || "")}</td><td>${escapeHtml(metric.abbreviation || "—")}</td><td>${escapeHtml(metric.value || "")}</td><td>${escapeHtml(metric.reference || "—")}</td><td>${escapeHtml(metric.unit || "—")}</td><td class="${metric.flag ? "flag-cell" : ""}">${escapeHtml(metric.flag || "—")}</td><td class="${confidenceClass}">${confidence}</td></tr>`;
+    const resultDisplay = metric.rawValue && metric.rawValue !== metric.value ? `${metric.rawValue} → ${metric.value}` : (metric.value || "");
+    const reviewStatus = metric.reviewStatus || (metric.manualEdited ? "人工修改待确认" : "随资料复核");
+    return `<tr><td>${escapeHtml(metric.name || "")}</td><td>${escapeHtml(metric.abbreviation || "—")}</td><td>${escapeHtml(resultDisplay)}</td><td>${escapeHtml(metric.reference || "—")}</td><td>${escapeHtml(metric.unit || "—")}</td><td class="${metric.flag ? "flag-cell" : ""}">${escapeHtml(metric.flag || "—")}</td><td>${metric.sourcePage ? `第${escapeHtml(metric.sourcePage)}张` : "—"}</td><td>${escapeHtml(reviewStatus)}</td><td class="${confidenceClass}">${confidence}</td></tr>`;
   }).join("");
-  return `<div class="saved-metrics"><div class="dialog-section-title">已归档结构化指标 <small>${metrics.length} 项</small></div><div class="metric-table-scroll"><table class="metric-table"><thead><tr><th>项目</th><th>缩写</th><th>结果</th><th>参考范围</th><th>单位</th><th>提示</th><th>置信度</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `<div class="saved-metrics"><div class="dialog-section-title">已归档结构化指标 <small>${metrics.length} 项；箭头表示人工修正</small></div><div class="metric-table-scroll"><table class="metric-table"><thead><tr><th>项目</th><th>缩写</th><th>结果（原值→当前）</th><th>参考范围</th><th>单位</th><th>提示</th><th>来源页</th><th>复核状态</th><th>置信度</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 function renderSavedAppendicitisData(data = {}) {
@@ -2576,7 +2869,7 @@ function openRecord(id) {
   els.dialogTitle.textContent = record.title;
   els.dialogBody.innerHTML = `
     <div class="dialog-images">${(record.images || []).map((image, index) => `<img src="${image}" alt="归档图片 ${index + 1}" />`).join("")}</div>
-    <div class="dialog-meta"><div class="meta-item"><small>个人/患者</small><strong>${escapeHtml(personLabel(record))}</strong></div><div class="meta-item"><small>病案/就诊号</small><strong>${escapeHtml(record.personId || "未填写")}</strong></div><div class="meta-item"><small>资料类型</small><strong>${escapeHtml(record.type)}</strong></div><div class="meta-item"><small>复核状态</small><strong>${escapeHtml(record.reviewStatus || "待人工复核")}</strong></div><div class="meta-item"><small>归档时间</small><strong>${escapeHtml(formatDate(record.createdAt))}</strong></div></div>
+    <div class="dialog-meta"><div class="meta-item"><small>个人/患者</small><strong>${escapeHtml(personLabel(record))}</strong></div><div class="meta-item"><small>病案/就诊号</small><strong>${escapeHtml(record.personId || "未填写")}</strong></div><div class="meta-item"><small>资料类型</small><strong>${escapeHtml(record.type)}</strong></div><div class="meta-item"><small>病例ID来源</small><strong>${escapeHtml(record.studyIdOrigin || getStudyIdOrigin(record.appendicitisData, record.personName, record.personId))}</strong></div><div class="meta-item"><small>批次质控</small><strong>${escapeHtml(record.batchAudit ? (record.batchAudit.identityConflict || record.batchAudit.mixedTypes ? "需处理冲突" : "通过") : "旧记录/未生成")}</strong></div><div class="meta-item"><small>复核状态</small><strong>${escapeHtml(record.reviewStatus || "待人工复核")}</strong></div><div class="meta-item"><small>归档时间</small><strong>${escapeHtml(formatDate(record.createdAt))}</strong></div></div>
     ${record.summary ? `<div class="dialog-text saved-summary"><div class="dialog-section-title">归档总结</div>${escapeHtml(record.summary)}</div><button class="button button-secondary copy-summary-button" type="button" data-copy-summary>复制归档总结</button>` : ""}
     ${renderSavedAppendicitisData(record.appendicitisData)}
     ${renderSavedMetrics(record.metrics)}
@@ -2672,13 +2965,17 @@ function getStableResearchHash(value) {
 
 function getResearchPatientId(record) {
   const studyId = String(record?.appendicitisData?.study_id || record?.appendicitisData?.studyId || "").trim();
-  if (studyId) return studyId;
-  return `CASE-${getStableResearchHash(personKey(record))}`;
+  const studyIdOrigin = getStudyIdOrigin(record?.appendicitisData, record?.personName, record?.personId);
+  if (studyId && studyIdOrigin === "人工研究编号") return studyId;
+  const canonicalPersonKey = personKey(record);
+  if (canonicalPersonKey && canonicalPersonKey !== "unassigned") return `CASE-${getStableResearchHash(canonicalPersonKey)}`;
+  return studyId || `CASE-${getStableResearchHash(`record:${record?.id || "unknown"}`)}`;
 }
 
 function getResearchPatientGroupingKey(record) {
   const studyId = String(record?.appendicitisData?.study_id || record?.appendicitisData?.studyId || "").trim();
-  return studyId ? `study:${studyId}` : personKey(record);
+  const studyIdOrigin = getStudyIdOrigin(record?.appendicitisData, record?.personName, record?.personId);
+  return studyId && studyIdOrigin === "人工研究编号" ? `study:${studyId}` : personKey(record);
 }
 
 function getResearchRecordId(record, index) {
@@ -2687,7 +2984,7 @@ function getResearchRecordId(record, index) {
 
 function getResearchMetrics(record) {
   if (Array.isArray(record.metrics) && record.metrics.length) return record.metrics;
-  if (record.text && labFieldRules[record.type]) return extractAllLabRows(record.text, []);
+  if (record.text && labFieldRules[record.type]) return extractAllLabRows(record.text, [], record.type);
   return [];
 }
 
@@ -2755,7 +3052,7 @@ const APPENDICITIS_RESEARCH_TABLES = [
     key: "operativeWses",
     name: "术中结局_WSES",
     sourceGroups: ["perforationCore", "operative", "labelAdjudication", "pathology"],
-    fields: ["perforationStatus", "perforationBasis", "appendix_macroscopic_status", "perforation_primary", "perforation_location", "perforation_type", "necrosis_present", "necrosis_location", "phlegmon_present", "abscess_present", "operative_abscess_size_cm", "peritoneal_extent", "contamination_type", "free_appendicolith", "final_wses_grade", "grade_source", "simpleInflammation", "suppuration", "gangrene", "operativeAppendicolith", "operativePurulentExudate", "suggested_wses_grade", "machine_grade_basis", "operative_report_available", "operative_media_available", "unknown_reason", "reviewer_1_grade", "reviewer_2_grade", "final_adjudicated_grade", "reviewer_1_comment", "reviewer_2_comment", "label_adjudication_status", "pathology_acute_appendicitis_confirmed", "pathologyDiagnosis", "pathologyPerforation", "pathologyAppendicolith", "appendixTumor", "pathologyText"],
+    fields: ["perforationStatus", "perforationBasis", "appendix_macroscopic_status", "perforation_primary", "perforation_location", "perforation_type", "necrosis_present", "necrosis_location", "phlegmon_present", "abscess_present", "operative_abscess_size_cm", "peritoneal_extent", "contamination_type", "free_appendicolith", "final_wses_grade", "grade_source", "simpleInflammation", "suppuration", "gangrene", "operativeAppendicolith", "operativePurulentExudate", "suggested_wses_grade", "machine_grade_basis", "machine_grade_algorithm_version", "operative_report_available", "operative_media_available", "unknown_reason", "reviewer_1_grade", "reviewer_2_grade", "final_adjudicated_grade", "reviewer_1_comment", "reviewer_2_comment", "label_adjudication_status", "pathology_acute_appendicitis_confirmed", "pathologyDiagnosis", "pathologyPerforation", "pathologyAppendicolith", "appendixTumor", "pathologyText"],
   },
   {
     key: "postoperative",
@@ -2790,6 +3087,7 @@ function getAppendicitisResearchTableSheet(patients, tableKey) {
   const fields = getAppendicitisResearchTableFields(tableKey);
   const headers = [
     "病例ID",
+    "身份匹配级别",
     "姓名/患者",
     "病案/住院/就诊号",
     "来源资料ID",
@@ -2806,6 +3104,7 @@ function getAppendicitisResearchTableSheet(patients, tableKey) {
       .sort((first, second) => first.getTime() - second.getTime());
     return [
       patient.patientId,
+      getPatientIdentityQuality(patient),
       representative.personName || "",
       patient.records.find((record) => record.personId)?.personId || "",
       sourceRecords.map((record) => record.id).join(" | "),
@@ -2872,6 +3171,7 @@ function buildResearchWorkbookRows() {
     recordRows.push([
       recordId,
       archivePatientId,
+      record.studyIdOrigin || getStudyIdOrigin(record.appendicitisData, record.personName, record.personId),
       record.personName || "",
       record.personId || "",
       reportDate,
@@ -2882,6 +3182,7 @@ function buildResearchWorkbookRows() {
       record.ocrEngine || "",
       record.ocrEdited ? "是" : "否",
       record.reviewStatus || "待人工复核",
+      record.batchAudit ? (record.batchAudit.identityConflict || record.batchAudit.mixedTypes ? "需处理批次冲突" : "批次质控通过") : "旧记录/未生成批次质控",
       (record.images || []).length,
       metrics.length,
       getAppendicitisFilledCount(record.appendicitisData),
@@ -2902,18 +3203,21 @@ function buildResearchWorkbookRows() {
         record.personId || "",
         reportDate,
         metric.sourcePage || "",
+        metric.sourceBox || "",
         record.type || "",
         getStudyInclusionStatus(record.appendicitisData),
         variableCode,
         metric.name || "未命名指标",
         metric.abbreviation || "",
+        metric.rawValue || metric.value || "",
         metric.value || "",
         resultNumber,
         metric.unit || "",
         metric.reference || "",
         metric.flag || "",
         confidence,
-        record.reviewStatus || "待人工复核",
+        metric.reviewStatus || (metric.manualEdited ? "人工修改待确认" : record.reviewStatus || "待人工复核"),
+        metric.sourceText || "",
         record.title || "",
       ]);
       if (!variableMap.has(variableCode)) {
@@ -2945,6 +3249,7 @@ function buildResearchWorkbookRows() {
     const reviewPending = patient.records.some((record) => record.reviewStatus !== "人工已复核");
     return [
       patient.patientId,
+      getPatientIdentityQuality(patient),
       firstRecord.personName || "",
       idRecord.personId || "",
       patient.records.length,
@@ -2963,14 +3268,16 @@ function buildResearchWorkbookRows() {
   const researchSheets = Object.fromEntries(APPENDICITIS_RESEARCH_TABLES.map((table) => [table.key, getAppendicitisResearchTableSheet(patients, table.key)]));
 
   return {
-    patientHeaders: ["病例ID", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "研究纳入状态", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
+    patientHeaders: ["病例ID", "身份匹配级别", "姓名/患者", "病案/住院/就诊号", "资料份数", "首份报告日期", "末份报告日期", "资料类型", "研究纳入状态", "归档状态", "复核提示", "隐私处理提示", "阑尾炎字段数", ...APPENDICITIS_FIELD_DEFS.map((field) => field.label)],
     patientRows,
-    recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
+    recordHeaders: ["资料记录ID", "病例ID", "病例ID来源", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "批次质控", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
     recordRows,
-    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "来源页", "资料类型", "研究纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
+    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "来源页", "来源区域(像素)", "资料类型", "研究纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果当前值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "指标复核状态", "来源OCR行", "来源资料标题"],
     metricRows,
     variableHeaders: ["变量编码", "资料类型", "指标名称", "英文缩写", "数据类型", "单位示例", "参考范围示例", "字段说明", "默认复核状态"],
     variableRows: [...variableMap.values()].sort((first, second) => String(first[0]).localeCompare(String(second[0]), "zh-CN")),
+    hospitalCorrectionHeaders: ["原始缩写", "标准缩写", "项目名称", "单位", "资料类型", "更新时间"],
+    hospitalCorrectionRows: getHospitalCorrections().map((item) => [item.raw || "", item.canonical || "", item.nameKey || "", item.unitKey || "", item.recordType || "", item.updatedAt ? new Date(Number(item.updatedAt)) : ""]),
     researchSheets,
     appendicitisFieldHeaders: ["字段编码", "字段名称", "研究数据表", "字段分组", "字段类型", "选项", "是否术前预测变量", "是否术中主要结局", "是否术后结局", "是否标签复核"],
     appendicitisFieldRows: getAppendicitisFieldDictionary(),
@@ -2987,7 +3294,7 @@ function setResearchColumnFormat(sheet, headers, rowCount, header, format) {
 }
 
 function getResearchColumnWidth(header, rows, column) {
-  if (["归档总结", "原始OCR文本", "归档备注", "字段说明", "隐私处理提示"].includes(header)) return 42;
+  if (["归档总结", "原始OCR文本", "归档备注", "来源OCR行", "字段说明", "隐私处理提示"].includes(header)) return 42;
   const lengths = [header, ...rows.slice(0, 60).map((row) => row[column])].map((value) => Array.from(String(value ?? "")).length);
   return Math.min(36, Math.max(10, Math.max(...lengths, 10) + 2));
 }
@@ -3056,6 +3363,7 @@ async function importRecordsJson(file) {
     showToast("备份记录数量过大，请拆分后再导入", "error");
     return;
   }
+  if (Array.isArray(payload?.hospitalCorrections)) saveHospitalCorrections(payload.hospitalCorrections);
   const existingIds = new Set(state.records.map((record) => record.id));
   const imported = sourceRecords.filter((record) => record && typeof record === "object").map((record, index) => normalizeRecord({
     ...record,
@@ -3092,6 +3400,7 @@ function exportClinicalDataPackage() {
   appendResearchSheet(workbook, "资料记录表", data.recordHeaders, data.recordRows, { "报告日期": "yyyy-mm-dd", "采集/归档时间": "yyyy-mm-dd hh:mm", "原图张数": "0", "指标数": "0" });
   appendResearchSheet(workbook, "指标明细表", data.metricHeaders, data.metricRows, { "报告日期": "yyyy-mm-dd", "结果数值": "0.############", "OCR置信度": "0.0%" });
   appendResearchSheet(workbook, "变量字典", data.variableHeaders, data.variableRows);
+  appendResearchSheet(workbook, "本院缩写校正", data.hospitalCorrectionHeaders, data.hospitalCorrectionRows, { "更新时间": "yyyy-mm-dd hh:mm" });
   APPENDICITIS_RESEARCH_TABLES.forEach((table) => {
     const sheet = data.researchSheets[table.key];
     appendResearchSheet(workbook, table.name, sheet.headers, sheet.rows, { "首份相关报告日期": "yyyy-mm-dd" });
@@ -3103,7 +3412,7 @@ function exportClinicalDataPackage() {
 
 function exportRecordsJson() {
   if (!state.records.length) { showToast("当前没有可导出的资料", "error"); return; }
-  const payload = { exportedAt: new Date().toISOString(), app: "临床采集 / v0.3", records: state.records };
+  const payload = { exportedAt: new Date().toISOString(), app: "临床采集 / v0.4", hospitalCorrections: getHospitalCorrections(), records: state.records };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   downloadBlob(blob, `clinical-capture-${getLocalDateStamp()}.json`);
   showToast("已导出本机档案 JSON 备份");
@@ -3123,7 +3432,9 @@ els.recognizeButton.addEventListener("click", recognizeImages);
 els.reRecognizeButton.addEventListener("click", recognizeImages);
 els.metricTableBody.addEventListener("input", (event) => {
   if (!event.target.closest("[data-metric-field]")) return;
-  state.currentMetrics = getEditableMetricRows();
+  const nextMetrics = getEditableMetricRows();
+  rememberMetricCorrections(state.metricSourceRows, nextMetrics, els.recordType?.value || "");
+  state.currentMetrics = nextMetrics;
   if (event.target.dataset.metricField === "abbreviation") {
     const metricIndex = Number(event.target.dataset.metricIndex);
     event.target.value = state.currentMetrics[metricIndex]?.abbreviation || "";
@@ -3133,7 +3444,7 @@ els.metricTableBody.addEventListener("input", (event) => {
     refreshSummary({ force: true, silent: true });
   }
 });
-els.ocrText.addEventListener("input", () => { state.ocrText = els.ocrText.value; state.ocrEdited = state.ocrText !== state.ocrOriginalText; if (els.reviewConfirmed) els.reviewConfirmed.checked = false; updateSmartResult(state.ocrText, true); updatePersonDetection(state.ocrText, true); renderNumbers(state.ocrText); });
+els.ocrText.addEventListener("input", () => { state.ocrText = els.ocrText.value; state.ocrEdited = state.ocrText !== state.ocrOriginalText; if (els.reviewConfirmed) els.reviewConfirmed.checked = false; updateSmartResult(state.ocrText, true); updatePersonDetection(state.ocrText, true); renderNumbers(state.ocrText); renderQualitySummary(state.ocrText); });
 els.personName.addEventListener("input", () => { if (els.personName.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
 els.personId.addEventListener("input", () => { if (els.personId.value.trim()) els.applyDetectedPersonButton.disabled = !state.detectedPersonName && !state.detectedPersonId; if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
 els.summaryText.addEventListener("input", () => { state.summaryManuallyEdited = true; updateSummaryMeta(); });
@@ -3168,6 +3479,7 @@ els.recordType.addEventListener("change", () => {
     if (!state.summaryManuallyEdited) refreshSummary({ force: true, silent: true });
     else updateSummaryMeta();
     applyAutoAppendicitisFields(els.ocrText.value, els.recordType.value);
+    renderQualitySummary(els.ocrText.value);
   }
 });
 els.archiveButton.addEventListener("click", archiveCurrent);
@@ -3217,6 +3529,11 @@ els.appendicitisForm.addEventListener("click", (event) => {
 });
 els.appendicitisForm.addEventListener("change", (event) => {
   const field = event.target.closest("[data-appendicitis-field]");
+  const fieldKey = field?.dataset.appendicitisField || "";
+  if (field && fieldKey !== "suggested_wses_grade" && fieldKey !== "machine_grade_basis" && fieldKey !== "machine_grade_algorithm_version" && fieldKey !== "study_id") {
+    const machineBasis = els.appendicitisForm.querySelector('[data-appendicitis-field="machine_grade_basis"]');
+    if (machineBasis?.value === "术中记录OCR") machineBasis.value = "术中记录OCR+手工修订";
+  }
   if (field?.dataset.appendicitisField === "suggested_wses_grade") {
     field.dataset.manuallyEdited = "true";
     const status = els.appendicitisForm.querySelector('[data-appendicitis-field="label_adjudication_status"]');

@@ -21,3 +21,4 @@ models/*_tmp/
 
 # Only PP-OCRv6 small is referenced by the current browser app.
 models/PP-OCRv5_*.tar
+.edge-test-profile*/

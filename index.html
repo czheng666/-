@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=28" />
+    <link rel="stylesheet" href="./styles.css?v=29" />
     <title>临床采集 · OCR 归档</title>
     <script type="importmap">
       {
@@ -199,6 +199,10 @@
               </div>
               <button class="button button-secondary" id="applyDetectedPersonButton" type="button" disabled>应用个人</button>
             </div>
+            <div class="quality-summary" id="qualitySummary" hidden>
+              <div class="quality-summary-head"><span class="smart-badge quality-badge">QC</span><strong id="qualitySummaryTitle">等待批次质控</strong></div>
+              <small id="qualitySummaryDetail">识别完成后检查每页身份、资料类型、表格完整性和跨页一致性</small>
+            </div>
             <section class="summary-panel" aria-labelledby="summary-panel-title">
               <div class="summary-panel-head">
                 <div>
@@ -230,7 +234,7 @@
             </div>
             <div class="review-gate">
               <label><input id="reviewConfirmed" type="checkbox" />我已核对姓名/编号、指标结果、单位和参考范围</label>
-              <small>只有完成人工复核，并确认“明确穿孔”且填写判定依据后，才允许归档为本项目科研数据。</small>
+              <small>只有完成身份、指标和当前资料字段的人工复核后，才允许归档为本项目科研数据；“穿孔/未穿孔”按术中主要结局单独记录。</small>
             </div>
             <div class="editor-actions">
               <button class="button button-secondary" id="reRecognizeButton" type="button">重新识别</button>
@@ -299,7 +303,7 @@
       </main>
 
       <footer class="app-footer">
-        <span>临床采集 / v0.3 本机科研采集版</span>
+        <span>临床采集 / v0.4 本机科研采集版</span>
         <span>本工具不替代医疗记录系统，请在归档前人工核对 OCR 结果。</span>
       </footer>
     </div>
@@ -319,6 +323,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=41"></script>
+    <script src="./app.js?v=42"></script>
   </body>
 </html>

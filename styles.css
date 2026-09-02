@@ -209,6 +209,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .patient-match-hint { display: block; margin-top: 6px; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 .patient-match-hint[data-state="match"] { color: var(--mint-dark); }
 .patient-match-hint[data-state="warning"] { color: var(--coral-dark); font-weight: 700; }
+.quality-summary { display: grid; gap: 5px; margin: -4px 0 15px; padding: 10px 13px; border: 1px solid rgba(13,143,127,.2); border-radius: 12px; background: rgba(245,251,247,.92); }
+.quality-summary[data-state="warning"] { border-color: rgba(214,106,75,.35); background: rgba(255,247,239,.9); }
+.quality-summary-head { display: flex; align-items: center; gap: 8px; color: var(--ink); font-size: 11px; }
+.quality-summary small { color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.quality-badge { color: #24645c; background: #d8f1e2; }
 
 .archive-card { grid-column: 1 / -1; }
 .archive-heading { align-items: center; }
