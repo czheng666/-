@@ -2066,8 +2066,9 @@ function intersectionOverUnion(first, second) {
 }
 
 function preferOcrBlock(candidate, current) {
-  const candidateScore = Number(candidate.score || 0) + (Number(candidate.variantPriority || 0) * 0.018);
-  const currentScore = Number(current.score || 0) + (Number(current.variantPriority || 0) * 0.018);
+  // 重点裁剪区只用于提高召回率，不能用优先级覆盖明显更高的识别置信度。
+  const candidateScore = Number(candidate.score || 0) + (Number(candidate.variantPriority || 0) * 0.004);
+  const currentScore = Number(current.score || 0) + (Number(current.variantPriority || 0) * 0.004);
   if (candidateScore !== currentScore) return candidateScore > currentScore;
   return String(candidate.text || "").length >= String(current.text || "").length;
 }
@@ -2205,9 +2206,15 @@ function filterPaddleBlocks(results) {
     const crop = block.contentCrop;
     const box = blockBounds(block);
     if (!crop || !box) return true;
-    // 只去掉报告上方的手机状态栏/文件名，不截掉报告底部的时间、样本号和备注。
+    // 去掉报告上方的手机状态栏、文件名和下方的浏览器/查看器工具栏。
     const centerY = box.y + (box.height / 2);
-    return centerY >= crop.y - Math.max(12, crop.height * 0.02);
+    const centerX = box.x + (box.width / 2);
+    const xPadding = Math.max(18, crop.width * 0.035);
+    const yPadding = Math.max(18, crop.height * 0.035);
+    return centerX >= crop.x - xPadding
+      && centerX <= crop.x + crop.width + xPadding
+      && centerY >= crop.y - yPadding
+      && centerY <= crop.y + crop.height + yPadding;
   });
 }
 
