@@ -90,6 +90,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .camera-source-picker select { max-width: min(360px, 48vw); height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--white); font: inherit; font-weight: 600; }
 .camera-source-row small { flex: 1 1 230px; color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
 .camera-device-refresh { min-height: 32px; padding: 6px 9px; font-size: 10px; }
+.phone-capture-guide { display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; padding: 10px 12px; border: 1px solid rgba(228,109,79,.18); border-radius: 12px; color: #735d55; background: linear-gradient(100deg, rgba(255,247,243,.95), rgba(255,255,255,.86)); }
+.phone-capture-guide-icon { width: 25px; height: 25px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 8px; color: #a54b38; font-size: 15px; background: rgba(255,142,111,.18); }
+.phone-capture-guide strong, .phone-capture-guide span { display: block; }
+.phone-capture-guide strong { margin-bottom: 3px; color: #64453d; font-size: 11px; }
+.phone-capture-guide span { font-size: 10px; line-height: 1.5; }
 
 .button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; border: 1px solid transparent; border-radius: 12px; font-size: 12px; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
@@ -210,6 +215,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .smart-detection-copy small { margin-top: 3px; overflow: hidden; color: var(--ink-soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .smart-badge { padding: 5px 6px; border-radius: 6px; color: var(--mint-dark); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 500; letter-spacing: .05em; background: var(--mint); }
 .person-detection { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 13px; margin: -6px 0 15px; border: 1px solid rgba(255,142,111,.25); border-radius: 13px; background: rgba(255,230,220,.55); }
+.person-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; flex: 0 0 auto; }
 .person-badge { color: #8c452e; background: #ffd9cc; }
 .patient-match-hint { display: block; margin-top: 6px; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 .patient-match-hint[data-state="match"] { color: var(--mint-dark); }
@@ -338,6 +344,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .capture-footer .button { width: 100%; }
   .smart-detection, .person-detection { align-items: stretch; flex-direction: column; }
   .smart-detection .button, .person-detection .button { width: 100%; }
+  .person-actions { width: 100%; }
   .summary-panel-head, .overview-head { flex-direction: column; }
   .summary-panel-actions { width: 100%; justify-content: stretch; }
   .summary-mode-picker { flex: 1 1 100%; justify-content: space-between; }

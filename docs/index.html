@@ -95,7 +95,12 @@
           <div class="camera-source-row">
             <label class="camera-source-picker" for="cameraDeviceSelect"><span>摄像头来源</span><select id="cameraDeviceSelect"><option value="">系统默认摄像头</option></select></label>
             <button class="button button-ghost camera-device-refresh" id="refreshCameraDevicesButton" type="button">刷新摄像头</button>
-            <small>手机通过 USB 被 Windows 识别为摄像头后，可在这里选择手机镜头</small>
+            <small>只能用手机拍照时：镜头尽量与屏幕平行，关闭闪光，先把电脑页面放大再拍。</small>
+          </div>
+
+          <div class="phone-capture-guide" role="note">
+            <div class="phone-capture-guide-icon">▤</div>
+            <div><strong>手机拍屏增强提示</strong><span>一页拍满一张照片，避免拍到黑边、浏览器工具栏和反光；手术记录表头较小，系统会自动重点复核姓名和住院号。</span></div>
           </div>
 
           <div class="preview-strip" id="previewStrip" aria-live="polite"></div>
@@ -138,7 +143,7 @@
           </div>
 
           <div class="capture-footer capture-footer-early">
-              <p class="helper-text"><span class="lock-icon">▣</span>拍照、导入图片，或扫描电脑页面后即可识别；下面的病例字段可同步填写。</p>
+              <p class="helper-text"><span class="lock-icon">▣</span>手机拍照或导入图片后即可识别；系统会自动进行去黑边、纠偏、去屏闪和重点区域复核。</p>
             <button class="button button-accent" id="recognizeButton" type="button" disabled>识别文字与数字 <span>→</span></button>
           </div>
 
@@ -203,7 +208,7 @@
                 <span class="smart-badge person-badge">PERSON</span>
                 <div><strong id="detectedPerson">等待识别个人</strong><small id="detectedPersonReason">将从姓名、住院号、门诊号或病案号中提取个人信息</small></div>
               </div>
-              <button class="button button-secondary" id="applyDetectedPersonButton" type="button" disabled>应用个人</button>
+              <div class="person-actions"><button class="button button-ghost" id="retakeHeaderButton" type="button" hidden>补拍表头</button><button class="button button-secondary" id="applyDetectedPersonButton" type="button" disabled>应用个人</button></div>
             </div>
             <div class="quality-summary" id="qualitySummary" hidden>
               <div class="quality-summary-head"><span class="smart-badge quality-badge">QC</span><strong id="qualitySummaryTitle">等待批次质控</strong></div>
@@ -329,6 +334,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=ocr-photo-v2"></script>
+    <script src="./app.js?v=ocr-photo-v3"></script>
   </body>
 </html>

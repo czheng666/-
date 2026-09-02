@@ -66,6 +66,7 @@ const els = {
   applyDetectedTypeButton: $("applyDetectedTypeButton"),
   detectedPerson: $("detectedPerson"),
   detectedPersonReason: $("detectedPersonReason"),
+  retakeHeaderButton: $("retakeHeaderButton"),
   applyDetectedPersonButton: $("applyDetectedPersonButton"),
   qualitySummary: $("qualitySummary"),
   qualitySummaryTitle: $("qualitySummaryTitle"),
@@ -1803,6 +1804,7 @@ function updatePersonDetection(text, autoApply = true) {
   els.detectedPerson.textContent = detection.confident ? `已识别：${[detection.name, detection.personId].filter(Boolean).join(" · ")}` : "未识别到个人信息";
   els.detectedPersonReason.textContent = detection.reason;
   els.applyDetectedPersonButton.disabled = !detection.confident;
+  if (els.retakeHeaderButton) els.retakeHeaderButton.hidden = Boolean(detection.name || detection.personId);
   if (autoApply) {
     if (!els.personName.value.trim() && detection.name) els.personName.value = detection.name;
     if (!els.personId.value.trim() && detection.personId) els.personId.value = detection.personId;
@@ -2704,7 +2706,13 @@ async function startCamera() {
   if (state.screenStream) stopScreenScan();
   try {
     const selectedDeviceId = els.cameraDeviceSelect?.value || state.cameraDeviceId || "";
-    const videoConstraints = selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: { ideal: "environment" } };
+    // 手机拍电脑屏幕时，优先请求高分辨率；使用 ideal 避免低端设备因不支持而打不开相机。
+    const videoConstraints = {
+      ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: { ideal: "environment" } }),
+      width: { ideal: 3840 },
+      height: { ideal: 2160 },
+      frameRate: { ideal: 30, max: 30 },
+    };
     state.stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
     const trackSettings = state.stream.getVideoTracks()[0]?.getSettings?.() || {};
     if (trackSettings.deviceId) state.cameraDeviceId = trackSettings.deviceId;
@@ -2799,7 +2807,8 @@ function takePhoto() {
   canvas.height = video.videoHeight || 960;
   canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
   const prefix = state.screenStream ? "screen" : "camera";
-  state.images.push({ dataUrl: canvas.toDataURL("image/jpeg", .92), name: `${prefix}-${Date.now()}.jpg` });
+  // 提高拍照原图质量，后续识别会在本地生成多个压缩/增强副本。
+  state.images.push({ dataUrl: canvas.toDataURL("image/jpeg", .97), name: `${prefix}-${Date.now()}.jpg` });
   renderPreviews();
   showToast(state.screenStream ? "已截取电脑页面 1 张" : "已拍摄 1 张图片");
 }
@@ -2848,6 +2857,7 @@ function resetCapture({ preserveCase = false } = {}) {
   els.detectedPerson.textContent = "等待识别个人";
   els.detectedPersonReason.textContent = "将从姓名、住院号、门诊号或病案号中提取个人信息";
   els.applyDetectedPersonButton.disabled = true;
+  if (els.retakeHeaderButton) els.retakeHeaderButton.hidden = true;
   if (els.qualitySummary) {
     els.qualitySummary.hidden = true;
     els.qualitySummary.dataset.state = "ok";
@@ -2954,6 +2964,7 @@ async function recognizeImages() {
     els.detectedPerson.textContent = "OCR 失败，暂无法提取个人信息";
     els.detectedPersonReason.textContent = "请根据上方错误信息检查本地模型资源、浏览器缓存或网络模块加载状态";
     els.applyDetectedPersonButton.disabled = true;
+    if (els.retakeHeaderButton) els.retakeHeaderButton.hidden = false;
     showToast(`${state.ocrEngine || "OCR"} 失败：${state.ocrError}`, "error");
   } finally {
     state.ocrBusy = false;
@@ -4014,6 +4025,11 @@ els.applyDetectedPersonButton.addEventListener("click", () => {
   syncAutoStudyId();
   updatePatientMatchHint();
   showToast("已应用个人信息，归档时将归入该个人");
+});
+els.retakeHeaderButton?.addEventListener("click", async () => {
+  els.cameraStage?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (!state.stream && !state.screenStream) await startCamera();
+  showToast("请只拍清楚病历顶部表头；拍完后点击“重新识别”即可合并到当前资料");
 });
 els.recordType.addEventListener("change", () => {
   updateAppendicitisFormContext();
