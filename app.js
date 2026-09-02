@@ -1,5 +1,6 @@
 const state = {
   images: [],
+  imagesLoading: false,
   records: [],
   stream: null,
   screenStream: null,
@@ -577,14 +578,14 @@ async function removeRecord(id) {
 }
 
 function renderPreviews() {
-  els.captureCount.textContent = `${state.images.length} 张`;
+  els.captureCount.textContent = state.imagesLoading ? `${state.images.length} 张 · 正在读取` : `${state.images.length} 张`;
   els.previewStrip.innerHTML = state.images.map((image, index) => `
     <div class="preview-item">
       <img src="${image.dataUrl}" alt="待识别图片 ${index + 1}" />
       <button class="remove-preview" type="button" data-index="${index}" aria-label="移除图片">×</button>
     </div>
   `).join("");
-  els.recognizeButton.disabled = state.images.length === 0 || state.ocrBusy;
+  els.recognizeButton.disabled = state.images.length === 0 || state.ocrBusy || state.imagesLoading;
 }
 
 function renderNumbers(text) {
@@ -1224,10 +1225,12 @@ function extractAllLabRows(text, blocks = []) {
   const candidates = headerIndex >= 0 ? lines.slice(headerIndex + 1) : lines;
   const rows = [];
   for (const line of candidates) {
-    if (isLabFooter(line.text)) break;
+    if (isLabFooter(line.text)) continue;
     const parsedRows = parseMergedLabLine(line.text, line.score) || [parseLabLine(line.text, line.score)].filter(Boolean);
+    const sourcePage = Number.isFinite(Number(line.page)) ? Number(line.page) + 1 : "";
     for (const parsed of parsedRows) {
-      if (parsed && !rows.some((row) => row.name === parsed.name && row.value === parsed.value)) rows.push(parsed);
+      const next = parsed ? { ...parsed, sourcePage } : null;
+      if (next && !rows.some((row) => row.name === next.name && row.value === next.value && row.sourcePage === next.sourcePage)) rows.push(next);
     }
   }
   return rows;
@@ -1243,7 +1246,7 @@ function renderMetricTable(text, type) {
     const confidenceLabel = hasConfidence ? `${confidence}%` : "未提供";
     const confidenceClass = !hasConfidence || confidence < 60 ? "low-confidence" : confidence < 80 ? "medium-confidence" : "";
     const editable = (field, value, placeholder = "") => `<input class="metric-edit" data-metric-field="${field}" data-metric-index="${index}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />`;
-    return `<tr><td>${editable("name", row.name, "项目名称")}</td><td>${editable("abbreviation", row.abbreviation, "缩写")}</td><td>${editable("value", row.value, "结果")}</td><td>${editable("reference", row.reference, "参考范围")}</td><td>${editable("unit", row.unit, "单位")}</td><td>${editable("flag", row.flag, "异常提示")}</td><td class="${confidenceClass}">${confidenceLabel}</td></tr>`;
+    return `<tr><td>${editable("name", row.name, "项目名称")}</td><td>${editable("abbreviation", row.abbreviation, "缩写")}</td><td>${editable("value", row.value, "结果")}</td><td>${editable("reference", row.reference, "参考范围")}</td><td>${editable("unit", row.unit, "单位")}</td><td>${editable("flag", row.flag, "异常提示")}</td><td>${row.sourcePage ? `第${row.sourcePage}张` : "—"}</td><td class="${confidenceClass}">${confidenceLabel}</td></tr>`;
   }).join("");
 }
 
@@ -1313,7 +1316,8 @@ function getCurrentSummaryMetrics(text, type) {
 }
 
 function formatSummaryMetric(row) {
-  return `${row.name || "未命名指标"}${row.abbreviation ? ` [${row.abbreviation}]` : ""}：${row.value || "未填写"}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}`;
+  const page = row.sourcePage ? `（第${row.sourcePage}张）` : "";
+  return `${row.name || "未命名指标"}${row.abbreviation ? ` [${row.abbreviation}]` : ""}${page}：${row.value || "未填写"}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}`;
 }
 
 function isMetricForReview(row) {
@@ -1687,7 +1691,19 @@ function mapOcrItemToSource(item, variant) {
 }
 
 function buildOcrTextFromBlocks(blocks) {
-  return groupOcrBlocksIntoLines(blocks).map((line) => line.text).filter(Boolean).join("\n");
+  const lines = groupOcrBlocksIntoLines(blocks);
+  let currentPage = null;
+  const output = [];
+  lines.forEach((line) => {
+    const page = Number.isFinite(Number(line.page)) ? Number(line.page) : null;
+    if (page !== null && page !== currentPage) {
+      if (output.length) output.push("");
+      output.push(`【第 ${page + 1} 张图片】`);
+      currentPage = page;
+    }
+    if (line.text) output.push(line.text);
+  });
+  return output.join("\n");
 }
 
 async function getOcrImages() {
@@ -1897,14 +1913,19 @@ async function recognizeWithTesseract() {
 }
 
 async function addFiles(files) {
-  const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
+  const imageFiles = [...files].filter((file) => file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(file.name || ""));
   if (!imageFiles.length) return;
-  for (const file of imageFiles) {
-    try { state.images.push({ dataUrl: await fileToDataUrl(file), name: file.name || "camera.jpg" }); }
-    catch { showToast("读取图片失败，请重试", "error"); }
-  }
+  state.imagesLoading = true;
   renderPreviews();
-  showToast(`已添加 ${imageFiles.length} 张图片`);
+  const additions = [];
+  for (const file of imageFiles) {
+    try { additions.push({ dataUrl: await fileToDataUrl(file), name: file.name || "camera.jpg" }); }
+    catch { showToast(`读取图片失败：${file.name || "未命名图片"}`, "error"); }
+  }
+  state.images.push(...additions);
+  state.imagesLoading = false;
+  renderPreviews();
+  showToast(`已添加 ${additions.length}/${imageFiles.length} 张图片`);
 }
 
 async function startCamera() {
@@ -2051,7 +2072,7 @@ function resetCapture({ preserveCase = false } = {}) {
 }
 
 async function recognizeImages() {
-  if (!state.images.length || state.ocrBusy) return;
+  if (!state.images.length || state.ocrBusy || state.imagesLoading) return;
   const selectedEngine = els.ocrEngineSelect?.value || "auto";
   state.ocrBusy = true;
   state.ocrError = "";
@@ -2104,9 +2125,9 @@ async function recognizeImages() {
     updatePersonDetection(combined, true);
     applyAutoAppendicitisFields(combined, els.recordType.value);
     renderNumbers(combined);
-    setOcrStatus(`识别完成 · ${state.ocrEngine.replace("（自动备用）", "")}`, false);
+    setOcrStatus(`识别完成 · ${state.ocrEngine.replace("（自动备用）", "")} · ${state.images.length} 张图片`, false);
     els.processingBar.hidden = true;
-    showToast(`${state.ocrEngine} 完成，请人工校对后归档`);
+    showToast(`${state.ocrEngine} 已完成 ${state.images.length} 张图片，请人工校对后归档`);
   } catch (error) {
     console.error(error);
     state.ocrError = String(error?.message || error || "未知错误").replace(/\s+/g, " ").slice(0, 220);
@@ -2854,6 +2875,7 @@ function buildResearchWorkbookRows() {
         record.personName || "",
         record.personId || "",
         reportDate,
+        metric.sourcePage || "",
         record.type || "",
         getStudyInclusionStatus(record.appendicitisData),
         variableCode,
@@ -2919,7 +2941,7 @@ function buildResearchWorkbookRows() {
     patientRows,
     recordHeaders: ["资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "资料标题", "采集/归档时间", "识别引擎", "OCR是否修改", "复核状态", "原图张数", "指标数", "阑尾炎字段数", "归档总结", "原始OCR文本", "归档备注"],
     recordRows,
-    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "资料类型", "研究纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
+    metricHeaders: ["指标记录ID", "资料记录ID", "病例ID", "姓名/患者", "病案/住院/就诊号", "报告日期", "来源页", "资料类型", "研究纳入状态", "变量编码", "指标名称", "英文缩写", "结果原值", "结果数值", "单位", "参考范围", "异常提示", "OCR置信度", "复核状态", "来源资料标题"],
     metricRows,
     variableHeaders: ["变量编码", "资料类型", "指标名称", "英文缩写", "数据类型", "单位示例", "参考范围示例", "字段说明", "默认复核状态"],
     variableRows: [...variableMap.values()].sort((first, second) => String(first[0]).localeCompare(String(second[0]), "zh-CN")),
