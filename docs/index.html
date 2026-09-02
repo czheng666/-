@@ -57,7 +57,7 @@
           <div class="section-heading">
             <div>
               <p class="step-label">01 / 新建资料</p>
-              <h2 id="capture-title">拍照或导入图片</h2>
+              <h2 id="capture-title">拍照、导入或扫描页面</h2>
             </div>
             <span class="capture-count" id="captureCount">0 张</span>
           </div>
@@ -85,6 +85,9 @@
                   <span class="button-icon">↑</span>从相册导入
                   <input id="imageInput" type="file" accept="image/*" multiple capture="environment" />
                 </label>
+                <button class="button button-ghost" id="scanScreenButton" type="button">
+                  <span class="button-icon">▣</span>扫描电脑页面
+                </button>
               </div>
             </div>
           </div>
@@ -129,7 +132,7 @@
           </div>
 
           <div class="capture-footer capture-footer-early">
-            <p class="helper-text"><span class="lock-icon">▣</span>拍好图片后可立即开始识别，下面的病例字段可同步填写。</p>
+              <p class="helper-text"><span class="lock-icon">▣</span>拍照、导入图片，或扫描电脑页面后即可识别；下面的病例字段可同步填写。</p>
             <button class="button button-accent" id="recognizeButton" type="button" disabled>识别文字与数字 <span>→</span></button>
           </div>
 
@@ -316,6 +319,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=38"></script>
+    <script src="./app.js?v=39"></script>
   </body>
 </html>

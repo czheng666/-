@@ -2,6 +2,7 @@ const state = {
   images: [],
   records: [],
   stream: null,
+  screenStream: null,
   editingRecordId: null,
   ocrText: "",
   detectedType: "",
@@ -32,6 +33,7 @@ const els = {
   startCameraButton: $("startCameraButton"),
   takePhotoButton: $("takePhotoButton"),
   imageInput: $("imageInput"),
+  scanScreenButton: $("scanScreenButton"),
   previewStrip: $("previewStrip"),
   captureCount: $("captureCount"),
   recordTitle: $("recordTitle"),
@@ -1910,12 +1912,14 @@ async function startCamera() {
     showToast("当前浏览器不支持相机，请从相册导入", "error");
     return;
   }
+  if (state.screenStream) stopScreenScan();
   try {
     state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
     els.cameraVideo.srcObject = state.stream;
     els.cameraVideo.hidden = false;
     els.cameraPlaceholder.hidden = true;
     els.takePhotoButton.disabled = false;
+    els.takePhotoButton.innerHTML = '<span class="button-icon">＋</span>拍一张';
     els.startCameraButton.textContent = "关闭相机";
     els.startCameraButton.dataset.open = "true";
   } catch {
@@ -1930,20 +1934,62 @@ function stopCamera() {
   els.cameraVideo.hidden = true;
   els.cameraPlaceholder.hidden = false;
   els.takePhotoButton.disabled = true;
+  els.takePhotoButton.innerHTML = '<span class="button-icon">＋</span>拍一张';
   els.startCameraButton.textContent = "开启相机";
   delete els.startCameraButton.dataset.open;
 }
 
+async function startScreenScan() {
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    showToast("当前浏览器不支持扫描电脑页面，请使用最新版 Chrome 或 Edge", "error");
+    return;
+  }
+  if (state.stream) stopCamera();
+  try {
+    state.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    const [track] = state.screenStream.getVideoTracks();
+    track?.addEventListener("ended", stopScreenScan, { once: true });
+    els.cameraVideo.srcObject = state.screenStream;
+    els.cameraVideo.hidden = false;
+    els.cameraPlaceholder.hidden = true;
+    els.takePhotoButton.disabled = false;
+    els.takePhotoButton.innerHTML = '<span class="button-icon">▣</span>截取页面';
+    els.scanScreenButton.textContent = "结束扫描页面";
+    els.scanScreenButton.dataset.open = "true";
+    showToast("已连接电脑页面，请选择病历页面后点击“截取页面”");
+  } catch (error) {
+    state.screenStream = null;
+    if (error?.name !== "NotAllowedError") showToast("无法读取电脑页面，请重新授权屏幕共享", "error");
+  }
+}
+
+function stopScreenScan() {
+  const stream = state.screenStream;
+  state.screenStream = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  if (!state.stream) {
+    els.cameraVideo.srcObject = null;
+    els.cameraVideo.hidden = true;
+    els.cameraPlaceholder.hidden = false;
+    els.takePhotoButton.disabled = true;
+  }
+  els.takePhotoButton.innerHTML = '<span class="button-icon">＋</span>拍一张';
+  els.scanScreenButton.textContent = "扫描电脑页面";
+  delete els.scanScreenButton.dataset.open;
+}
+
 function takePhoto() {
-  if (!state.stream) return;
+  const captureStream = state.stream || state.screenStream;
+  if (!captureStream) return;
   const video = els.cameraVideo;
   const canvas = els.captureCanvas;
   canvas.width = video.videoWidth || 1280;
   canvas.height = video.videoHeight || 960;
   canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-  state.images.push({ dataUrl: canvas.toDataURL("image/jpeg", .88), name: `camera-${Date.now()}.jpg` });
+  const prefix = state.screenStream ? "screen" : "camera";
+  state.images.push({ dataUrl: canvas.toDataURL("image/jpeg", .92), name: `${prefix}-${Date.now()}.jpg` });
   renderPreviews();
-  showToast("已拍摄 1 张图片");
+  showToast(state.screenStream ? "已截取电脑页面 1 张" : "已拍摄 1 张图片");
 }
 
 function resetCapture({ preserveCase = false } = {}) {
@@ -3018,6 +3064,7 @@ function exportRecordsJson() {
 els.startCameraButton.addEventListener("click", () => els.startCameraButton.dataset.open ? stopCamera() : startCamera());
 els.takePhotoButton.addEventListener("click", takePhoto);
 els.imageInput.addEventListener("change", (event) => { addFiles(event.target.files); event.target.value = ""; });
+els.scanScreenButton.addEventListener("click", () => els.scanScreenButton.dataset.open ? stopScreenScan() : startScreenScan());
 els.previewStrip.addEventListener("click", (event) => {
   const button = event.target.closest(".remove-preview");
   if (!button) return;
@@ -3100,7 +3147,7 @@ els.dialogBody.addEventListener("click", (event) => { if (event.target.closest("
 els.closeDialogButton.addEventListener("click", () => els.recordDialog.close());
 els.dialogDoneButton.addEventListener("click", () => els.recordDialog.close());
 els.deleteRecordButton.addEventListener("click", deleteCurrentRecord);
-window.addEventListener("beforeunload", stopCamera);
+window.addEventListener("beforeunload", () => { stopCamera(); stopScreenScan(); });
 
 renderAppendicitisForm();
 els.appendicitisForm.addEventListener("input", () => { updateAppendicitisProgress(); scheduleCaptureDraftSave(); if (!state.summaryManuallyEdited && els.ocrText.value.trim()) refreshSummary({ force: true, silent: true }); });
