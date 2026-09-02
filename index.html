@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="./styles.css?v=29" />
+    <link rel="stylesheet" href="./styles.css?v=30" />
     <title>临床采集 · OCR 归档</title>
     <script type="importmap">
       {
@@ -90,6 +90,12 @@
                 </button>
               </div>
             </div>
+          </div>
+
+          <div class="camera-source-row">
+            <label class="camera-source-picker" for="cameraDeviceSelect"><span>摄像头来源</span><select id="cameraDeviceSelect"><option value="">系统默认摄像头</option></select></label>
+            <button class="button button-ghost camera-device-refresh" id="refreshCameraDevicesButton" type="button">刷新摄像头</button>
+            <small>手机通过 USB 被 Windows 识别为摄像头后，可在这里选择手机镜头</small>
           </div>
 
           <div class="preview-strip" id="previewStrip" aria-live="polite"></div>
@@ -323,6 +329,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=42"></script>
+    <script src="./app.js?v=43"></script>
   </body>
 </html>

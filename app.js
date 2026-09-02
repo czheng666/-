@@ -4,6 +4,8 @@ const state = {
   records: [],
   stream: null,
   screenStream: null,
+  cameraDeviceId: "",
+  cameraDevices: [],
   editingRecordId: null,
   ocrText: "",
   detectedType: "",
@@ -35,6 +37,8 @@ const els = {
   captureCanvas: $("captureCanvas"),
   startCameraButton: $("startCameraButton"),
   takePhotoButton: $("takePhotoButton"),
+  cameraDeviceSelect: $("cameraDeviceSelect"),
+  refreshCameraDevicesButton: $("refreshCameraDevicesButton"),
   imageInput: $("imageInput"),
   scanScreenButton: $("scanScreenButton"),
   previewStrip: $("previewStrip"),
@@ -2214,7 +2218,13 @@ async function startCamera() {
   }
   if (state.screenStream) stopScreenScan();
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    const selectedDeviceId = els.cameraDeviceSelect?.value || state.cameraDeviceId || "";
+    const videoConstraints = selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: { ideal: "environment" } };
+    state.stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+    const trackSettings = state.stream.getVideoTracks()[0]?.getSettings?.() || {};
+    if (trackSettings.deviceId) state.cameraDeviceId = trackSettings.deviceId;
+    await refreshCameraDevices();
+    if (state.cameraDeviceId && els.cameraDeviceSelect) els.cameraDeviceSelect.value = state.cameraDeviceId;
     els.cameraVideo.srcObject = state.stream;
     els.cameraVideo.hidden = false;
     els.cameraPlaceholder.hidden = true;
@@ -2224,6 +2234,23 @@ async function startCamera() {
     els.startCameraButton.dataset.open = "true";
   } catch {
     showToast("无法打开相机，请检查浏览器权限", "error");
+  }
+}
+
+async function refreshCameraDevices() {
+  if (!els.cameraDeviceSelect || !navigator.mediaDevices?.enumerateDevices) return [];
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    state.cameraDevices = devices.filter((device) => device.kind === "videoinput");
+    const options = state.cameraDevices.map((device, index) => {
+      const label = device.label || `摄像头 ${index + 1}`;
+      return `<option value="${escapeHtml(device.deviceId)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    els.cameraDeviceSelect.innerHTML = `<option value="">系统默认摄像头</option>${options}`;
+    if (state.cameraDeviceId && state.cameraDevices.some((device) => device.deviceId === state.cameraDeviceId)) els.cameraDeviceSelect.value = state.cameraDeviceId;
+    return state.cameraDevices;
+  } catch {
+    return [];
   }
 }
 
@@ -3430,6 +3457,21 @@ els.previewStrip.addEventListener("click", (event) => {
 });
 els.recognizeButton.addEventListener("click", recognizeImages);
 els.reRecognizeButton.addEventListener("click", recognizeImages);
+els.refreshCameraDevicesButton?.addEventListener("click", async () => {
+  const devices = await refreshCameraDevices();
+  showToast(devices.length ? `已发现 ${devices.length} 个摄像头，可在来源列表中选择手机` : "暂未发现可选摄像头，请先连接手机并在系统中选择 USB 摄像头");
+});
+els.cameraDeviceSelect?.addEventListener("change", async () => {
+  state.cameraDeviceId = els.cameraDeviceSelect.value || "";
+  if (!state.stream) {
+    showToast(state.cameraDeviceId ? "已选择摄像头，点击“开启相机”即可使用" : "已恢复使用系统默认摄像头");
+    return;
+  }
+  const wasOpen = Boolean(els.startCameraButton.dataset.open);
+  if (!wasOpen) return;
+  stopCamera();
+  await startCamera();
+});
 els.metricTableBody.addEventListener("input", (event) => {
   if (!event.target.closest("[data-metric-field]")) return;
   const nextMetrics = getEditableMetricRows();
@@ -3552,6 +3594,7 @@ els.continueCaseAfterArchive.addEventListener("change", scheduleCaptureDraftSave
 restoreCaptureDraft();
 ensurePatientMatchHint();
 updatePatientMatchHint();
+refreshCameraDevices();
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").then((registration) => registration.update()).catch(() => {});
 loadRecords();

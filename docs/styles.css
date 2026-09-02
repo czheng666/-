@@ -85,6 +85,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .camera-actions > * { pointer-events: auto; }
 .camera-secondary-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; width: 100%; }
 .camera-actions .button-primary { min-width: 124px; }
+.camera-source-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-top: 10px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 11px; background: rgba(251,253,251,.85); }
+.camera-source-picker { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-soft); font-size: 10px; font-weight: 800; }
+.camera-source-picker select { max-width: min(360px, 48vw); height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--white); font: inherit; font-weight: 600; }
+.camera-source-row small { flex: 1 1 230px; color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
+.camera-device-refresh { min-height: 32px; padding: 6px 9px; font-size: 10px; }
 
 .button { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; border: 1px solid transparent; border-radius: 12px; font-size: 12px; font-weight: 800; transition: transform .18s ease, box-shadow .18s ease, background .18s ease; }
 .button:hover:not(:disabled) { transform: translateY(-1px); }
@@ -321,7 +326,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   .hero-panel h2 { font-size: 37px; }
   .camera-stage { min-height: 295px; }
   .camera-stage video { min-height: 295px; }
-  .camera-actions { gap: 7px; }
+.camera-actions { gap: 7px; }
+.camera-source-row { align-items: stretch; }
+.camera-source-picker { flex: 1 1 100%; justify-content: space-between; }
+.camera-source-picker select { flex: 1; max-width: none; }
   .button { min-height: 40px; padding: 9px 12px; font-size: 11px; }
   .button-icon { display: none; }
   .form-grid, .archive-controls, .dialog-meta { grid-template-columns: 1fr; }

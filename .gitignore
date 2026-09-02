@@ -23,3 +23,4 @@ models/*_tmp/
 models/PP-OCRv5_*.tar
 .edge-test-profile*/
 clinical-capture-offline-package.zip
+clinical-capture-offline-package-v2.zip
