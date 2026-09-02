@@ -2013,15 +2013,16 @@ async function getOcrVariants(dataUrl, page, { includeBase = true, includeFocuse
   const header = { ...content, height: headerHeight };
   if (includeBase) variants.push(await createOcrVariant(image, header, "表头·姓名和编号", 7, page, reportCrop ? "screen" : "contrast"));
   if (includeFocused) {
-    const nameRegion = { ...content, width: Math.max(1, content.width * 0.62), height: Math.max(1, content.height * 0.38) };
+    const nameRegion = { ...content, width: Math.max(1, content.width * 0.74), height: Math.max(1, content.height * 0.38) };
     const idRegion = {
-      x: content.x + (content.width * 0.35),
+      // 本院手术记录的住院号可能换到下一行左侧，不能只截表头右半边。
+      x: content.x + (content.width * 0.02),
       y: content.y,
-      width: Math.max(1, content.width * 0.65),
+      width: Math.max(1, content.width * 0.96),
       height: Math.max(1, content.height * 0.38),
     };
     variants.push(await createOcrVariant(image, nameRegion, "表头·姓名放大", 10, page, "adaptive"));
-    variants.push(await createOcrVariant(image, idRegion, "表头·编号放大", 9, page, "adaptive"));
+    variants.push(await createOcrVariant(image, idRegion, "表头·个人信息整栏", 11, page, "adaptive"));
     const bodyRegion = {
       x: content.x + (content.width * 0.025),
       y: content.y + (content.height * 0.16),
@@ -2219,7 +2220,8 @@ async function runPaddleVariants(ocr, variants, results, progressStart, progress
     const batch = await predictPaddleWithTimeout(
       ocr,
       [dataUrlToBlob(variant.dataUrl)],
-      { textRecScoreThresh: 0.25 },
+      // 表头小字和屏幕拍照后的字符置信度偏低，优先保证姓名/住院号召回率，后续仍需人工复核。
+      { textRecScoreThresh: Number(variant.priority || 0) >= 7 ? 0.14 : 0.18 },
       PADDLE_PREDICT_TIMEOUT_MS,
       (seconds) => { els.processingDetail.textContent = `${stageLabel}：${variantIndex + 1}/${variants.length} · ${variant.label}（已用 ${seconds} 秒）`; },
     );
