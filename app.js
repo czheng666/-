@@ -518,7 +518,7 @@ function applyAutoAppendicitisFields(text, type) {
       ["imagingPerforation", ["穿孔", "破裂", "壁缺损"]],
     ] : []),
     ...(type === "手术记录" ? [
-      ["operativeAppendicolith", ["粪石", "阑尾结石"]], ["operativePurulentExudate", ["脓液", "脓性渗出", "脓性分泌物"]],
+      ["operativeAppendicolith", ["粪石", "阑尾结石"]], ["operativePurulentExudate", ["脓液", "脓性渗出", "脓性分泌物", "脓性液体", "脓性渗出液"]],
       ["abscess_present", ["脓肿", "脓腔"]], ["phlegmon_present", ["炎性包块", "包块"]],
       ["perforation_primary", ["穿孔", "破裂", "破口", "壁缺损"]], ["drainagePlaced", ["腹腔引流", "放置引流", "引流管"]],
       ["necrosis_present", ["坏死", "坏疽"]], ["free_appendicolith", ["游离粪石"]],
@@ -555,10 +555,10 @@ function applyAutoAppendicitisFields(text, type) {
       || compact.match(/(?:穿孔|破口|破裂).{0,8}(?:位于|在|于)?阑尾(?:的)?(尖端|头端|体部|根部|基底部|远端)/i)?.[1];
     if (perforationLocation) changed = setAppendicitisAutoValue("perforation_location", `阑尾${perforationLocation}`) || changed;
     const operativeRules = [
-      ["appendix_macroscopic_status", [[/阑尾.{0,8}(?:正常外观|外观正常)/i, "正常外观"], [/节段性坏死/i, "节段性坏死"], [/根部坏死/i, "根部坏死"], [/(?:蜂窝织炎|炎性包块)/i, "蜂窝织炎/炎性包块"], [/脓肿|脓腔/i, "脓肿"], [/局限性腹膜炎/i, "局限性腹膜炎"], [/弥漫性腹膜炎/i, "弥漫性腹膜炎"], [/单纯炎症|单纯性炎症/i, "单纯炎症"]]],
+      ["appendix_macroscopic_status", [[/阑尾.{0,8}(?:正常外观|外观正常)/i, "正常外观"], [/节段性坏死/i, "节段性坏死"], [/根部坏死/i, "根部坏死"], [/(?:蜂窝织炎|炎性包块)/i, "蜂窝织炎/炎性包块"], [/脓肿|脓腔/i, "脓肿"], [/局限性腹膜炎/i, "局限性腹膜炎"], [/弥漫性腹膜炎/i, "弥漫性腹膜炎"], [/化脓性阑尾炎|化脓性炎症/i, "化脓性炎症"], [/单纯炎症|单纯性炎症/i, "单纯炎症"]]],
       ["necrosis_location", [[/根部坏死/i, "阑尾根部"], [/节段性坏死/i, "节段性"], [/坏死/i, "其他"]]],
       ["peritoneal_extent", [[/弥漫性腹膜炎|全腹膜炎|弥漫性污染/i, "弥漫性"], [/局限性腹膜炎|局部腹膜炎|右下腹腹膜炎/i, "局限性"]]],
-      ["contamination_type", [[/粪性污染|粪汁|粪便污染/i, "粪性"], [/混合污染/i, "混合"], [/脓性污染|脓液污染|脓性渗出/i, "脓性"]]],
+      ["contamination_type", [[/粪性污染|粪汁|粪便污染/i, "粪性"], [/混合污染/i, "混合"], [/脓性污染|脓液污染|脓性渗出|脓性液体|脓性分泌物/i, "脓性"]]],
       ["perforation_type", [[/游离性穿孔|自由穿孔|游离穿孔/i, "游离性"], [/包裹性穿孔|局限性穿孔|局限.*穿孔/i, "局限/包裹性"]]],
     ];
     operativeRules.forEach(([key, rules]) => {
@@ -718,8 +718,8 @@ const documentTypeRules = [
   { type: "肝肾功能", terms: ["肝功能", "肾功能", "谷丙转氨酶", "谷草转氨酶", "肌酐", "尿素", "尿酸", "ALT", "AST", "TBIL", "CREA", "BUN", "UA", "eGFR"] },
   { type: "止凝血", terms: ["凝血", "止凝血", "凝血酶原时间", "活化部分凝血活酶时间", "纤维蛋白原", "D-二聚体", "D二聚体", "INR", "PT", "APTT", "FIB", "TT"] },
   { type: "CT", terms: ["CT", "计算机断层", "断层扫描", "增强扫描", "CT平扫", "CT增强"] },
-  { type: "彩超", terms: ["彩超", "彩色多普勒", "超声", "B超", "超声检查", "ULTRASOUND"] },
-  { type: "手术记录", terms: ["手术记录", "手术名称", "术中所见", "术式", "切除阑尾", "腹腔镜阑尾切除"] },
+  { type: "彩超", terms: ["彩超", "彩色多普勒", "彩色多普勒超声", "超声诊断报告", "超声", "B超", "超声检查", "ULTRASOUND"] },
+  { type: "手术记录", terms: ["手术记录", "手术名称", "术中所见", "术中诊断", "术式", "腹腔镜探查", "切除阑尾", "腹腔镜阑尾切除"] },
   { type: "门诊病历", terms: ["门诊病历", "门诊记录", "门诊号", "主诉", "现病史", "体格检查"] },
   { type: "住院病历", terms: ["住院病历", "入院记录", "住院号", "入院诊断", "病程记录", "查房记录"] },
   { type: "出院小结", terms: ["出院小结", "出院记录", "出院诊断", "出院医嘱", "入院日期", "出院日期"] },
@@ -985,7 +985,8 @@ const APPENDICITIS_FIELD_GROUPS = [
 const APPENDICITIS_FIELD_DEFS = APPENDICITIS_FIELD_GROUPS.flatMap((group) => group.fields.map((field) => ({ ...field, groupKey: group.key, groupTitle: group.title, groupTypes: group.types || [] })));
 
 function detectDocumentType(text) {
-  const haystack = text.toUpperCase();
+  // OCR 常把中文标题识别成“手 术 记 录”“彩 色 多 普 勒”，类型判断必须先去掉中文间隔。
+  const haystack = String(text || "").toUpperCase().replace(/[\s\u3000]+/g, "");
   const ranked = documentTypeRules.map((rule) => {
     const matches = rule.terms.filter((term) => haystack.includes(term.toUpperCase()));
     return { ...rule, matches, score: matches.length };
@@ -1019,17 +1020,23 @@ function normalizeIdentityLabels(text) {
     .replace(/住\s*[·•.。]?\s*院\s*号/g, "住院号")
     .replace(/门\s*[·•.。]?\s*诊\s*号/g, "门诊号")
     .replace(/就\s*[·•.。]?\s*诊\s*号/g, "就诊号")
-    .replace(/患\s*者\s*(?:ID|编号)/gi, "患者ID");
+    .replace(/患\s*者\s*(?:ID|编号)/gi, "患者ID")
+    .replace(/科\s*(?:别|室)/g, "科别")
+    .replace(/超\s*声\s*号/g, "超声号")
+    .replace(/检\s*查\s*号/g, "检查号")
+    .replace(/报\s*告\s*号/g, "报告号")
+    .replace(/仪\s*器\s*型\s*号/g, "仪器型号");
 }
 
 function cleanIdentityValue(value, kind = "name") {
-  const nextLabel = /(?:类别|性别|病区|病房|床号|年龄|标本类型|申请医生|申请日期|报告日期|检查日期|临床诊断|病案号|住院号|门诊号|患者ID|患者编号|病历号|就诊号)/i;
+  const nextLabel = /(?:类别|科别|科室|性别|病区|病房|床号|床位号|年龄|标本类型|标本号|申请医生|申请日期|报告日期|检查日期|临床诊断|病案号|住院号|门诊号|患者ID|患者编号|病历号|就诊号|超声号|检查号|报告号|仪器型号)/i;
   const source = String(value || "").replace(/^[\s:：#№No号-]+/i, "").trim().split(nextLabel)[0].trim();
   if (kind === "name") {
-    const compact = source.replace(/[ \t]+/g, "");
-    return compact.match(/^[\u4e00-\u9fa5]{2,12}(?:[·•][\u4e00-\u9fa5]{1,12})?|^[A-Za-z][A-Za-z .'-]{1,30}/)?.[0] || "";
+    const compact = source.replace(/[\s\u3000]+/g, "");
+    // 中文姓名通常为2-6个字，缩短上限可避免把“陈岩科别/年龄”等后续字段吞进姓名。
+    return compact.match(/^[\u4e00-\u9fa5]{2,6}(?:[·•][\u4e00-\u9fa5]{1,12})?|^[A-Za-z][A-Za-z .'-]{1,30}/)?.[0] || "";
   }
-  return source.replace(/[ \t]+/g, "").match(/^[A-Za-z0-9][A-Za-z0-9\-/]{2,30}/)?.[0] || "";
+  return source.replace(/[\s\u3000]+/g, "").match(/^[A-Za-z0-9][A-Za-z0-9\-/]{2,30}/)?.[0] || "";
 }
 
 function escapeRegExp(value) {
@@ -1039,7 +1046,7 @@ function escapeRegExp(value) {
 function findRawIdentityValue(text, labels, kind) {
   const normalized = normalizeIdentityLabels(text).replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
   const labelPattern = labels.map(escapeRegExp).join("|");
-  const nextLabels = ["类别", "性别", "病区", "病房", "床号", "年龄", "标本类型", "标本号", "样本说明", "申请医生", "申请日期", "报告日期", "检查日期", "临床诊断", "申请项目", "病案号", "住院号", "门诊号", "患者ID", "患者编号", "病历号", "就诊号", "Name", "Patient No", "MRN"];
+  const nextLabels = ["类别", "科别", "科室", "性别", "病区", "病房", "床号", "床位号", "年龄", "标本类型", "标本号", "样本说明", "申请医生", "申请日期", "报告日期", "检查日期", "临床诊断", "申请项目", "病案号", "住院号", "门诊号", "患者ID", "患者编号", "病历号", "就诊号", "超声号", "检查号", "报告号", "仪器型号", "Name", "Patient No", "MRN"];
   const nextLabelPattern = nextLabels.map(escapeRegExp).join("|");
   const match = normalized.match(new RegExp(`(?:${labelPattern})\\s*[:：=]?\\s*(.{1,40}?)(?=\\s*(?:${nextLabelPattern})\\s*[:：=]|$)`, "i"));
   return cleanIdentityValue(match?.[1] || "", kind);
@@ -1549,13 +1556,23 @@ function buildSummaryFromMetrics(type, metrics) {
 
 function extractReportSection(text, labels) {
   const lines = getTextLines(text);
-  const index = lines.findIndex((line) => labels.some((label) => line.includes(label)));
+  const compactLines = lines.map((line) => line.replace(/[\s\u3000]+/g, ""));
+  const index = compactLines.findIndex((line) => labels.some((label) => line.includes(label.replace(/[\s\u3000]+/g, ""))));
   if (index < 0) return "";
   const source = lines[index];
-  const label = labels.find((item) => source.includes(item));
-  const sameLine = source.slice(source.indexOf(label) + label.length).replace(/^\s*[:：-]?\s*/, "").trim();
+  const compactSource = compactLines[index];
+  const label = labels.find((item) => compactSource.includes(item.replace(/[\s\u3000]+/g, "")));
+  const compactLabel = label?.replace(/[\s\u3000]+/g, "") || "";
+  const labelIndex = compactSource.indexOf(compactLabel);
+  let sourceOffset = 0;
+  let compactOffset = 0;
+  while (sourceOffset < source.length && compactOffset < labelIndex + compactLabel.length) {
+    if (!/[\s\u3000]/.test(source[sourceOffset])) compactOffset += 1;
+    sourceOffset += 1;
+  }
+  const sameLine = source.slice(sourceOffset).replace(/^\s*[:：-]?\s*/, "").trim();
   if (sameLine) return sameLine;
-  return lines.slice(index + 1, index + 5).filter((line) => !["所见", "检查所见", "印象", "结论", "提示"].some((stop) => line.startsWith(stop))).join(" ");
+  return lines.slice(index + 1, index + 6).filter((line) => !["所见", "检查所见", "印象", "结论", "提示"].some((stop) => line.replace(/[\s\u3000]+/g, "").startsWith(stop))).join(" ");
 }
 
 function buildSummary(text, type) {
@@ -1748,7 +1765,7 @@ async function prepareImageForOcr(dataUrl) {
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
   const longestSide = Math.max(sourceWidth, sourceHeight);
-  const targetLongestSide = Math.min(3200, Math.max(1800, longestSide));
+  const targetLongestSide = Math.min(3600, Math.max(2200, longestSide));
   const scale = targetLongestSide / longestSide;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(sourceWidth * scale));
@@ -1756,9 +1773,69 @@ async function prepareImageForOcr(dataUrl) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.filter = "grayscale(1) contrast(1.16) brightness(1.03)";
+  // 手机拍电脑屏幕时会出现摩尔纹、暗角和低对比度；先轻度去屏闪，再做灰度拉伸。
+  context.filter = "grayscale(1) contrast(1.24) brightness(1.04) blur(0.22px)";
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  enhanceOcrPixels(context, canvas.width, canvas.height, "screen");
   return canvas.toDataURL("image/jpeg", 0.95);
+}
+
+function getHistogramPercentile(histogram, total, percentile) {
+  const target = Math.max(0, Math.min(total - 1, Math.round(total * percentile)));
+  let cumulative = 0;
+  for (let value = 0; value < histogram.length; value += 1) {
+    cumulative += histogram[value];
+    if (cumulative > target) return value;
+  }
+  return histogram.length - 1;
+}
+
+function enhanceOcrPixels(context, width, height, enhancement = "contrast") {
+  let imageData;
+  try { imageData = context.getImageData(0, 0, width, height); }
+  catch { return; }
+  const pixels = imageData.data;
+  const total = width * height;
+  const gray = new Uint8Array(total);
+  const histogram = new Uint32Array(256);
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    const value = Math.round((pixels[offset] * 0.299) + (pixels[offset + 1] * 0.587) + (pixels[offset + 2] * 0.114));
+    gray[index] = value;
+    histogram[value] += 1;
+  }
+  const low = getHistogramPercentile(histogram, total, 0.015);
+  const high = getHistogramPercentile(histogram, total, 0.985);
+  const span = Math.max(24, high - low);
+  let background = null;
+  if (enhancement === "adaptive") {
+    // 大范围模糊图作为局部背景，能抑制屏幕亮度不均和拍照阴影，再保留细小文字。
+    const backgroundCanvas = document.createElement("canvas");
+    backgroundCanvas.width = width;
+    backgroundCanvas.height = height;
+    const backgroundContext = backgroundCanvas.getContext("2d", { willReadFrequently: true });
+    backgroundContext.filter = "blur(10px)";
+    backgroundContext.drawImage(context.canvas, 0, 0);
+    try { background = backgroundContext.getImageData(0, 0, width, height).data; }
+    catch { background = null; }
+  }
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    const stretched = clamp(Math.round(((gray[index] - low) * 255) / span), 0, 255);
+    let value = stretched;
+    if (background) {
+      const localBackground = (background[offset] * 0.299) + (background[offset + 1] * 0.587) + (background[offset + 2] * 0.114);
+      const delta = Math.max(18, Math.min(42, localBackground * 0.14));
+      value = stretched < localBackground - delta ? 0 : 255;
+    } else if (enhancement === "screen") {
+      value = clamp(Math.round(128 + ((stretched - 128) * 1.10)), 0, 255);
+    }
+    pixels[offset] = value;
+    pixels[offset + 1] = value;
+    pixels[offset + 2] = value;
+    pixels[offset + 3] = 255;
+  }
+  context.putImageData(imageData, 0, 0);
 }
 
 function clamp(value, min, max) {
@@ -1841,10 +1918,59 @@ function detectContentCrop(image) {
   return reduction > 0.12 ? crop : null;
 }
 
+function detectBrightDocumentCrop(image) {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const previewWidth = Math.min(1000, sourceWidth);
+  const previewHeight = Math.max(1, Math.round(sourceHeight * previewWidth / sourceWidth));
+  const canvas = document.createElement("canvas");
+  canvas.width = previewWidth;
+  canvas.height = previewHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.drawImage(image, 0, 0, previewWidth, previewHeight);
+  const pixels = context.getImageData(0, 0, previewWidth, previewHeight).data;
+  const rowBright = new Float32Array(previewHeight);
+  const colBright = new Float32Array(previewWidth);
+  for (let y = 0; y < previewHeight; y += 1) {
+    for (let x = 0; x < previewWidth; x += 1) {
+      const offset = (y * previewWidth + x) * 4;
+      const gray = (pixels[offset] * 0.299) + (pixels[offset + 1] * 0.587) + (pixels[offset + 2] * 0.114);
+      // 报告页通常明显比显示器边框/黑色背景亮，允许轻微拍照阴影。
+      if (gray > 158) {
+        rowBright[y] += 1;
+        colBright[x] += 1;
+      }
+    }
+  }
+  const rowGroups = projectionGroups(rowBright, previewWidth * 0.42, Math.max(8, Math.round(previewHeight * 0.025)));
+  const colGroups = projectionGroups(colBright, previewHeight * 0.42, Math.max(8, Math.round(previewWidth * 0.025)));
+  const row = rowGroups.filter((group) => group.end - group.start + 1 > previewHeight * 0.22)
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start))[0];
+  const col = colGroups.filter((group) => group.end - group.start + 1 > previewWidth * 0.42)
+    .sort((a, b) => (b.end - b.start) - (a.end - a.start))[0];
+  if (!row || !col) return null;
+  const paddingX = Math.max(10, Math.round(previewWidth * 0.012));
+  const paddingY = Math.max(10, Math.round(previewHeight * 0.012));
+  const x = clamp(col.start - paddingX, 0, previewWidth - 1);
+  const y = clamp(row.start - paddingY, 0, previewHeight - 1);
+  const right = clamp(col.end + paddingX, x + 1, previewWidth - 1);
+  const bottom = clamp(row.end + paddingY, y + 1, previewHeight - 1);
+  const scaleX = sourceWidth / previewWidth;
+  const scaleY = sourceHeight / previewHeight;
+  const crop = {
+    x: x * scaleX,
+    y: y * scaleY,
+    width: (right - x + 1) * scaleX,
+    height: (bottom - y + 1) * scaleY,
+  };
+  const reduction = 1 - ((crop.width * crop.height) / (sourceWidth * sourceHeight));
+  return reduction > 0.06 ? crop : null;
+}
+
 async function createOcrVariant(image, crop, label, priority, page, enhancement = "contrast") {
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
-  const targetLongestSide = Math.min(2800, Math.max(1600, Math.max(crop.width, crop.height)));
+  const targetLongestSide = Math.min(enhancement === "adaptive" ? 2600 : 3200, Math.max(1900, Math.max(crop.width, crop.height)));
   const scale = targetLongestSide / Math.max(crop.width, crop.height);
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(crop.width * scale));
@@ -1852,20 +1978,11 @@ async function createOcrVariant(image, crop, label, priority, page, enhancement 
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.filter = "grayscale(1) contrast(1.2) brightness(1.03)";
+  context.filter = enhancement === "screen"
+    ? "grayscale(1) contrast(1.24) brightness(1.04) blur(0.22px)"
+    : "grayscale(1) contrast(1.20) brightness(1.03)";
   context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-  if (enhancement === "threshold") {
-    const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-    for (let offset = 0; offset < pixels.data.length; offset += 4) {
-      const gray = (pixels.data[offset] * 0.299) + (pixels.data[offset + 1] * 0.587) + (pixels.data[offset + 2] * 0.114);
-      const value = gray < 192 ? 0 : 255;
-      pixels.data[offset] = value;
-      pixels.data[offset + 1] = value;
-      pixels.data[offset + 2] = value;
-      pixels.data[offset + 3] = 255;
-    }
-    context.putImageData(pixels, 0, 0);
-  }
+  enhanceOcrPixels(context, canvas.width, canvas.height, enhancement);
   return {
     dataUrl: canvas.toDataURL("image/jpeg", 0.97),
     page,
@@ -1884,12 +2001,17 @@ async function getOcrVariants(dataUrl, page, { includeBase = true, includeFocuse
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
   const full = { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
-  const content = detectContentCrop(image) || full;
+  // 先找报告页的亮区域，避免把手机状态栏、浏览器工具栏和显示器黑边送进 OCR。
+  const reportCrop = detectBrightDocumentCrop(image);
+  const content = reportCrop || detectContentCrop(image) || full;
   const variants = [];
-  if (includeBase) variants.push(await createOcrVariant(image, full, "整图", 0, page));
-  const headerHeight = Math.max(1, content.height * 0.48);
+  if (includeBase) {
+    variants.push(await createOcrVariant(image, full, "整图·去屏闪", 0, page, "screen"));
+    if (reportCrop) variants.push(await createOcrVariant(image, reportCrop, "报告页·去边框", 3, page, "screen"));
+  }
+  const headerHeight = Math.max(1, content.height * 0.42);
   const header = { ...content, height: headerHeight };
-  if (includeBase) variants.push(await createOcrVariant(image, header, "表头·姓名和编号", 6, page));
+  if (includeBase) variants.push(await createOcrVariant(image, header, "表头·姓名和编号", 7, page, reportCrop ? "screen" : "contrast"));
   if (includeFocused) {
     const nameRegion = { ...content, width: Math.max(1, content.width * 0.62), height: Math.max(1, content.height * 0.38) };
     const idRegion = {
@@ -1898,15 +2020,23 @@ async function getOcrVariants(dataUrl, page, { includeBase = true, includeFocuse
       width: Math.max(1, content.width * 0.65),
       height: Math.max(1, content.height * 0.38),
     };
-    variants.push(await createOcrVariant(image, nameRegion, "表头·姓名放大", 8, page, "threshold"));
-    variants.push(await createOcrVariant(image, idRegion, "表头·编号放大", 7, page, "threshold"));
+    variants.push(await createOcrVariant(image, nameRegion, "表头·姓名放大", 10, page, "adaptive"));
+    variants.push(await createOcrVariant(image, idRegion, "表头·编号放大", 9, page, "adaptive"));
+    const bodyRegion = {
+      x: content.x + (content.width * 0.025),
+      y: content.y + (content.height * 0.16),
+      width: Math.max(1, content.width * 0.95),
+      height: Math.max(1, content.height * 0.80),
+    };
+    variants.push(await createOcrVariant(image, bodyRegion, "正文·去屏闪", 5, page, "screen"));
+    variants.push(await createOcrVariant(image, bodyRegion, "正文·自适应增强", 4, page, "adaptive"));
     const isDifferent = Math.abs(content.x - full.x) > sourceWidth * 0.04
       || Math.abs(content.y - full.y) > sourceHeight * 0.04
       || Math.abs(content.width - full.width) > sourceWidth * 0.08
       || Math.abs(content.height - full.height) > sourceHeight * 0.08;
     if (isDifferent) {
       const detail = { ...content, y: content.y + content.height * 0.24, height: content.height * 0.76 };
-      variants.push(await createOcrVariant(image, detail, "指标/正文区域", 4, page));
+      variants.push(await createOcrVariant(image, detail, "指标/正文区域", 6, page, "screen"));
     }
   }
   variants.forEach((variant) => { variant.contentCrop = content; });
@@ -2128,10 +2258,14 @@ async function recognizeWithPaddle() {
       const pageBlocks = blocks.filter((block) => Number(block.page) === index);
       const pageText = buildOcrTextFromBlocks(pageBlocks);
       const pagePerson = detectPerson(pageText, pageBlocks);
+      const pageType = detectDocumentType(pageText);
       const pageMetrics = labFieldRules[els.recordType.value] ? extractAllLabRows(pageText, pageBlocks) : [];
       const identityMissing = !pagePerson.name && !pagePerson.personId;
       const metricsMissing = Boolean(labFieldRules[els.recordType.value]) && pageMetrics.length < labThreshold;
-      if (identityMissing || metricsMissing) weakPages.push(index);
+      const textDocument = ["手术记录", "住院病历", "门诊病历", "出院小结", "病理报告"].includes(pageType.type);
+      // 长段落病历即使识别出了姓名，也可能漏掉术中所见；短文本/块数少时补跑正文增强区域。
+      const textBodyWeak = textDocument && (pageText.replace(/\s/g, "").length < 900 || pageBlocks.length < 28);
+      if (identityMissing || metricsMissing || textBodyWeak) weakPages.push(index);
     }
     if (weakPages.length) {
       const focusedVariants = [];
