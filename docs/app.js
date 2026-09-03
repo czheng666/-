@@ -1005,7 +1005,8 @@ function normalizeClinicalOcrText(text) {
     .replace(/手\s*术\s*记\s*(?:录|承|承)/g, "手术记录")
     .replace(/术\s*(?:导|中)\s*诊\s*断/g, "术中诊断")
     .replace(/急性\s*(?:闲|阐|閑|间|閱)\s*(?:讨|尾)\s*炎/g, "急性阑尾炎")
-    .replace(/(?:闲|阐|閑)\s*(?:讨|尾)/g, "阑尾")
+    .replace(/(?:闲|阐|閑|间|菌|闹|阀)\s*(?:讨|尾)/g, "阑尾")
+    .replace(/肝\s*胆\s*胰\s*(?:胖|肥)/g, "肝胆胰脾")
     .replace(/腹\s*(?:腔|腕)\s*(?:镜|锁)\s*(?:阑|闲|阐|羡)\s*(?:尾|讨)\s*切除\s*(?:术|林)?/g, "腹腔镜阑尾切除术")
     .replace(/麻\s*(?:风|竖|肯|王)(?=\s*(?:护|医|前|用|中|记录|药))/g, "麻醉")
     .replace(/穿\s*(?:制|茜)\s*孔/g, "穿刺孔")
@@ -1156,12 +1157,20 @@ function findHeaderPersonIdHeuristic(text, blocks = []) {
   const candidates = [];
   sourceLines.forEach((line, index) => {
     const context = `${sourceLines[index - 1] || ""} ${line} ${sourceLines[index + 1] || ""}`;
+    const nearbyLines = sourceLines.slice(Math.max(0, index - 6), index + 1).join(" ");
     for (const match of line.matchAll(idPattern)) {
       const value = String(match[0]).replace(/[\s\u3000]/g, "");
       if (/^20\d{6,12}$/.test(value) || /^\d{4,6}(?:19|20)\d{2}$/.test(value)) continue;
       if (/(?:标本号|超声号|检查号|报告号|条码|申请日期|报告日期|采集时间|接收时间|报告时间)/i.test(context)) continue;
       const hasPatientLabel = /(?:病案号|病历号|住院号|门诊号|就诊号|患者ID|患者编号|Patient\s*No|MRN)/i.test(context);
-      candidates.push({ value, score: (hasPatientLabel ? 0.85 : 0.28) + Math.min(0.12, value.length / 100), priority: hasPatientLabel ? 12 : 0 });
+      const hasOrphanPatientLabel = /(?:病案号|病历号|住院号|门诊号|就诊号|患者ID|患者编号)\s*[:：]?\s*(?:$|床号|病区|科别|姓名|性别|年龄)/i.test(nearbyLines);
+      const hasNearbyName = /(?:姓名|患者姓名|病人姓名)\s*[:：]?\s*[\u4e00-\u9fa5]{2,8}/i.test(nearbyLines);
+      const orphanHeaderId = hasOrphanPatientLabel && hasNearbyName && /^\d{6,18}$/.test(value);
+      candidates.push({
+        value,
+        score: (hasPatientLabel ? 0.85 : orphanHeaderId ? 0.72 : 0.28) + Math.min(0.12, value.length / 100),
+        priority: hasPatientLabel ? 12 : orphanHeaderId ? 9 : 0,
+      });
     }
   });
   return choosePersonCandidate(candidates, "");
