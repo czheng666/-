@@ -623,6 +623,8 @@ function normalizeRecord(record) {
     ocrOriginalText: record.ocrOriginalText || record.text || "",
     studyIdOrigin: record.studyIdOrigin || "",
     batchAudit: record.batchAudit && typeof record.batchAudit === "object" ? record.batchAudit : null,
+    batchTypes: Array.isArray(record.batchTypes) ? record.batchTypes : (Array.isArray(record.batchAudit?.types) ? record.batchAudit.types : (record.type ? [record.type] : [])),
+    batchTypeSummary: record.batchTypeSummary || "",
     metrics: Array.isArray(record.metrics) ? record.metrics.map((metric) => ({
       ...metric,
       rawName: metric.rawName || metric.name || "",
@@ -718,6 +720,7 @@ const documentTypeRules = [
   { type: "血常规", terms: ["血常规", "白细胞", "红细胞", "血红蛋白", "血小板", "WBC", "RBC", "HGB", "PLT", "NEUT", "LYM"] },
   { type: "肝肾功能", terms: ["肝功能", "肾功能", "谷丙转氨酶", "谷草转氨酶", "肌酐", "尿素", "尿酸", "ALT", "AST", "TBIL", "CREA", "BUN", "UA", "eGFR"] },
   { type: "止凝血", terms: ["凝血", "止凝血", "凝血酶原时间", "活化部分凝血活酶时间", "纤维蛋白原", "D-二聚体", "D二聚体", "INR", "PT", "APTT", "FIB", "TT"] },
+  { type: "其他检验", terms: ["降钙素原", "C反应蛋白", "超敏C反应蛋白", "PCT", "CRP", "乳酸", "血糖", "电解质"] },
   { type: "CT", terms: ["CT", "计算机断层", "断层扫描", "增强扫描", "CT平扫", "CT增强"] },
   { type: "彩超", terms: ["彩超", "彩色多普勒", "彩色多普勒超声", "超声诊断报告", "超声", "B超", "超声检查", "ULTRASOUND"] },
   { type: "手术记录", terms: ["手术记录", "手术名称", "术中所见", "术中诊断", "术式", "腹腔镜探查", "切除阑尾", "腹腔镜阑尾切除"] },
@@ -1240,25 +1243,40 @@ function getOcrPageTextMap(text = "") {
   return pages;
 }
 
-function getBatchIdentityAudit(text = "", blocks = []) {
+function getBatchPageContexts(text = "", blocks = [], imageCount = state.images.length) {
   const usableBlocks = state.ocrEdited ? [] : (Array.isArray(blocks) ? blocks : []);
   const detectedPages = usableBlocks.map((block) => Number(block.page)).filter(Number.isFinite);
-  const pageCount = Math.max(1, state.images.length, detectedPages.length ? Math.max(...detectedPages) + 1 : 0);
+  const pageCount = Math.max(1, Number(imageCount) || 0, detectedPages.length ? Math.max(...detectedPages) + 1 : 0);
   const pageTextMap = getOcrPageTextMap(text);
-  const pages = [];
+  const contexts = [];
   for (let page = 0; page < pageCount; page += 1) {
     const pageBlocks = usableBlocks.filter((block) => Number(block.page) === page);
     const pageText = pageBlocks.length ? buildOcrTextFromBlocks(pageBlocks) : pageTextMap.get(page) || (page === 0 && !pageTextMap.size ? String(text || "") : "");
-    const identity = detectPerson(pageText, pageBlocks);
-    const type = detectDocumentType(pageText);
-    const metricCount = labFieldRules[type.type] ? extractAllLabRows(pageText, pageBlocks, type.type).length : 0;
-    pages.push({ page: page + 1, name: identity.name, personId: identity.personId, type: type.confident ? type.type : "", metricCount });
+    contexts.push({ page: page + 1, pageIndex: page, pageText, pageBlocks });
   }
+  return contexts;
+}
+
+function hasLabEvidence(text = "") {
+  const compact = String(text || "").replace(/[\s\u3000]/g, "");
+  if (!/\d/.test(compact)) return false;
+  return /项目.*(?:结果|参考范围|参考值|单位)|英文缩写|白细胞|红细胞|血红蛋白|血小板|总蛋白|白蛋白|肌酐|尿素|凝血酶原|纤维蛋白原|降钙素原|C反应蛋白|APTT|PT[-_]?INR|WBC|HGB|PLT|NEUT|LYMPH|ALT|AST|TBIL|CREA|BUN|CRP|PCT/i.test(compact);
+}
+
+function getBatchIdentityAudit(text = "", blocks = []) {
+  const contexts = getBatchPageContexts(text, blocks);
+  const pages = [];
+  contexts.forEach((context) => {
+    const identity = detectPerson(context.pageText, context.pageBlocks);
+    const type = detectDocumentType(context.pageText);
+    const metricCount = hasLabEvidence(context.pageText) ? extractAllLabRows(context.pageText, context.pageBlocks, type.type).length : 0;
+    pages.push({ page: context.page, name: identity.name, personId: identity.personId, type: type.confident ? type.type : "", metricCount });
+  });
   const uniqueNames = [...new Map(pages.filter((page) => page.name).map((page) => [normalizeIdentityToken(page.name), page.name])).values()];
   const uniqueIds = [...new Map(pages.filter((page) => page.personId).map((page) => [normalizeIdentityToken(page.personId), page.personId])).values()];
   const uniqueTypes = [...new Set(pages.map((page) => page.type).filter(Boolean))];
   return {
-    pageCount,
+    pageCount: contexts.length,
     pages,
     names: uniqueNames,
     personIds: uniqueIds,
@@ -1268,6 +1286,36 @@ function getBatchIdentityAudit(text = "", blocks = []) {
     pagesWithIdentity: pages.filter((page) => page.name || page.personId).length,
     totalMetrics: pages.reduce((sum, page) => sum + page.metricCount, 0),
   };
+}
+
+function formatBatchTypeSummary(audit = state.batchAudit) {
+  if (!audit?.pages?.length) return "类型待确认";
+  const groups = new Map();
+  audit.pages.forEach((page) => {
+    const type = page.type || "未分类";
+    if (!groups.has(type)) groups.set(type, []);
+    groups.get(type).push(page.page);
+  });
+  return [...groups.entries()].map(([type, pages]) => `${type}（第${pages.join("、")}张）`).join("、");
+}
+
+function extractBatchLabRows(text = "", blocks = [], preferredType = "", imageCount = state.images.length, auditOverride = null) {
+  const audit = auditOverride || state.batchAudit || getBatchIdentityAudit(text, blocks);
+  const contexts = getBatchPageContexts(text, blocks, imageCount);
+  const rows = [];
+  contexts.forEach((context) => {
+    if (!hasLabEvidence(context.pageText)) return;
+    const pageAudit = audit.pages?.[context.pageIndex] || {};
+    const pageType = pageAudit.type || preferredType || "";
+    extractAllLabRows(context.pageText, context.pageBlocks, pageType).forEach((row) => {
+      const next = { ...row, sourceType: pageType };
+      if (!rows.some((item) => item.name === next.name && item.abbreviation === next.abbreviation && item.value === next.value && item.sourcePage === context.page)) {
+        next.sourcePage = context.page;
+        rows.push(next);
+      }
+    });
+  });
+  return rows;
 }
 
 function renderQualitySummary(text = els.ocrText?.value || "") {
@@ -1282,14 +1330,14 @@ function renderQualitySummary(text = els.ocrText?.value || "") {
   const manualIdentity = Boolean(els.personName?.value.trim() || els.personId?.value.trim());
   const issues = [];
   if (audit.identityConflict) issues.push(`跨页身份不一致：${audit.names.join("、") || ""}${audit.personIds.length ? ` / ${audit.personIds.join("、")}` : ""}`);
-  if (audit.mixedTypes) issues.push(`同批次包含多种资料类型：${audit.types.join("、")}，建议分开归档`);
   if (!audit.pagesWithIdentity && !manualIdentity) issues.push("尚未确认患者姓名或病案/就诊号");
   const stateName = issues.length ? "warning" : "ok";
   els.qualitySummary.hidden = false;
   els.qualitySummary.dataset.state = stateName;
   els.qualitySummaryTitle.textContent = issues.length ? "需要处理批次质控提示" : "批次质控通过，可继续校对";
   const learnedCount = getHospitalCorrections().length;
-  els.qualitySummaryDetail.textContent = `${audit.pageCount} 张图片 · ${audit.pagesWithIdentity}/${audit.pageCount} 页读到身份 · ${audit.types.length ? audit.types.join("、") : "类型待确认"} · ${audit.totalMetrics || 0} 条表格指标 · 本院校正 ${learnedCount} 条${issues.length ? `；${issues.join("；")}` : "；未发现跨页身份冲突"}`;
+  const typeDetail = audit.mixedTypes ? `按页归类：${formatBatchTypeSummary(audit)}` : (audit.types.length ? audit.types.join("、") : "类型待确认");
+  els.qualitySummaryDetail.textContent = `${audit.pageCount} 张图片 · ${audit.pagesWithIdentity}/${audit.pageCount} 页读到身份 · ${typeDetail} · ${audit.totalMetrics || 0} 条表格指标 · 本院校正 ${learnedCount} 条${issues.length ? `；${issues.join("；")}` : "；身份一致，可合并归档"}`;
 }
 
 function getTextLines(text) {
@@ -1601,7 +1649,8 @@ function extractAllLabRows(text, blocks = [], recordType = els.recordType?.value
 }
 
 function renderMetricTable(text, type) {
-  const rows = labFieldRules[type] ? extractAllLabRows(text, state.ocrBlocks, type) : [];
+  // 混合批次也要显示所有检验表格；recordType 只代表主资料类型，不应阻断其他页面的指标。
+  const rows = extractBatchLabRows(text, state.ocrBlocks, type);
   const sourceRows = rows.map((row) => ({
     ...row,
     rawName: row.rawName || row.name || "",
@@ -1620,7 +1669,8 @@ function renderMetricTable(text, type) {
     const confidenceLabel = hasConfidence ? `${confidence}%` : "未提供";
     const confidenceClass = !hasConfidence || confidence < 60 ? "low-confidence" : confidence < 80 ? "medium-confidence" : "";
     const editable = (field, value, placeholder = "") => `<input class="metric-edit" data-metric-field="${field}" data-metric-index="${index}" value="${escapeHtml(value || "")}" placeholder="${escapeHtml(placeholder)}" />`;
-    return `<tr><td>${editable("name", row.name, "项目名称")}</td><td>${editable("abbreviation", row.abbreviation, "缩写")}</td><td>${editable("value", row.value, "结果")}</td><td>${editable("reference", row.reference, "参考范围")}</td><td>${editable("unit", row.unit, "单位")}</td><td>${editable("flag", row.flag, "异常提示")}</td><td>${row.sourcePage ? `第${row.sourcePage}张` : "—"}</td><td class="${confidenceClass}">${confidenceLabel}</td></tr>`;
+    const sourceLabel = row.sourcePage ? `第${row.sourcePage}张${row.sourceType ? ` · ${row.sourceType}` : ""}` : (row.sourceType || "—");
+    return `<tr><td>${editable("name", row.name, "项目名称")}</td><td>${editable("abbreviation", row.abbreviation, "缩写")}</td><td>${editable("value", row.value, "结果")}</td><td>${editable("reference", row.reference, "参考范围")}</td><td>${editable("unit", row.unit, "单位")}</td><td>${editable("flag", row.flag, "异常提示")}</td><td>${escapeHtml(sourceLabel)}</td><td class="${confidenceClass}">${confidenceLabel}</td></tr>`;
   }).join("");
 }
 
@@ -1676,8 +1726,8 @@ function extractReportSection(text, labels) {
 
 function buildSummary(text, type) {
   if (!text.trim()) return "";
-  if (labFieldRules[type]) {
-    const rows = extractAllLabRows(text, state.ocrBlocks);
+  if (labFieldRules[type] || hasLabEvidence(text)) {
+    const rows = extractBatchLabRows(text, state.ocrBlocks, type);
     if (rows.length) {
       const lines = rows.map((row) => `${row.name}${row.abbreviation ? ` [${row.abbreviation}]` : ""}：${row.value}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}${row.confidence > 0 && row.confidence < 0.75 ? " · 低置信度，需复核" : ""}`);
       return `${type}（自动归纳，共 ${rows.length} 项）\n${lines.join("\n")}\n\n提示：以上为 OCR 逐行结构化结果，请对照原图核对每一项数值、单位和参考范围。`;
@@ -1701,15 +1751,15 @@ const SUMMARY_MODE_HINTS = {
 };
 
 function getCurrentSummaryMetrics(text, type) {
-  if (!labFieldRules[type]) return [];
   const editedRows = getEditableMetricRows();
   if (state.currentMetrics.length && editedRows.length) return editedRows;
-  return extractAllLabRows(text, state.ocrBlocks);
+  return extractBatchLabRows(text, state.ocrBlocks, type);
 }
 
 function formatSummaryMetric(row) {
   const page = row.sourcePage ? `（第${row.sourcePage}张）` : "";
-  return `${row.name || "未命名指标"}${row.abbreviation ? ` [${row.abbreviation}]` : ""}${page}：${row.value || "未填写"}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}`;
+  const type = row.sourceType ? ` · ${row.sourceType}` : "";
+  return `${row.name || "未命名指标"}${row.abbreviation ? ` [${row.abbreviation}]` : ""}${page}${type}：${row.value || "未填写"}${row.unit ? ` ${row.unit}` : ""}${row.reference ? `（参考 ${row.reference}）` : ""}${row.flag ? ` · ${row.flag}` : ""}`;
 }
 
 function isMetricForReview(row) {
@@ -1753,11 +1803,35 @@ function appendAppendicitisResearchSummary(baseSummary, mode = state.summaryMode
   return clinicalSummary ? `${clinicalSummary}\n\n${baseSummary}` : baseSummary;
 }
 
+function buildMixedBatchSummary(text, primaryType, mode, audit, metrics) {
+  const identity = [els.personName?.value.trim(), els.personId?.value.trim()].filter(Boolean).join(" · ");
+  const contextLine = [identity ? `个人：${identity}` : "", `图片数：${audit.pageCount}`, `指标总数：${metrics.length}`].filter(Boolean).join("；");
+  const distribution = `资料分布：${formatBatchTypeSummary(audit)}`;
+  const flagged = metrics.filter(isMetricForReview);
+  if (mode === "all-metrics") {
+    return `同一患者混合资料批次（全部指标清单，共 ${metrics.length} 项）\n${contextLine}\n${distribution}\n\n${metrics.length ? metrics.map(formatSummaryMetric).join("\n") : "未识别到结构化检验指标。"}\n\n提示：指标已按来源图片保留，请对照原图逐项核对。`;
+  }
+  if (mode === "abnormal-metrics") {
+    return `同一患者混合资料批次（异常/待复核优先）\n${contextLine}\n${distribution}\n\n${flagged.length ? flagged.map(formatSummaryMetric).join("\n") : "未识别到异常标记；仍需对照原图确认。"}\n\n提示：低置信度和异常标记仅用于复核排序，不代表临床结论。`;
+  }
+  if (mode === "raw") {
+    const lines = getTextLines(text).filter((line) => !isLabFooter(line)).slice(0, 24);
+    return `同一患者混合资料批次（原文重点）\n${contextLine}\n${distribution}\n\n${lines.join("\n")}\n\n提示：完整 OCR 原文和原图已随批次保存。`;
+  }
+  const flaggedText = flagged.length ? flagged.map(formatSummaryMetric).join("\n") : "未识别到异常标记";
+  const metricsText = metrics.length ? metrics.map(formatSummaryMetric).join("\n") : "未识别到结构化检验指标";
+  const base = `同一患者混合资料批次（科研摘要）\n${contextLine}\n${distribution}\n\n异常/待复核指标：\n${flaggedText}\n\n全部指标明细：\n${metricsText}\n\n提示：手术记录、影像和入院病历按原文及来源页保留；指标已结构化到导出表格，归档前请完成逐项人工复核。`;
+  return appendAppendicitisResearchSummary(base, mode);
+}
+
 function buildSummaryByMode(text, type, mode = state.summaryMode) {
   const source = String(text || "").trim();
   if (!source) return "";
+  const batchAudit = state.batchAudit || getBatchIdentityAudit(source, state.ocrBlocks);
+  const batchMetrics = getCurrentSummaryMetrics(source, type);
+  if (batchAudit.mixedTypes) return buildMixedBatchSummary(source, type, mode, batchAudit, batchMetrics);
   if (labFieldRules[type]) {
-    const metrics = getCurrentSummaryMetrics(source, type);
+    const metrics = batchMetrics;
     if (!metrics.length) return appendAppendicitisResearchSummary(buildSummary(source, type), mode);
     const flagged = metrics.filter(isMetricForReview);
     const reportDate = typeof getReportDate === "function" ? getReportDate(source) : "";
@@ -1784,7 +1858,7 @@ function buildSummaryByMode(text, type, mode = state.summaryMode) {
 function updateSummaryMeta() {
   if (!els.summaryMeta || !els.summaryEditStatus) return;
   const text = els.summaryText?.value || "";
-  const metrics = labFieldRules[els.recordType?.value] ? getCurrentSummaryMetrics(els.ocrText?.value || "", els.recordType.value).length : 0;
+  const metrics = text ? getCurrentSummaryMetrics(els.ocrText?.value || "", els.recordType?.value || "").length : 0;
   els.summaryMeta.textContent = text ? `${text.length} 字${metrics ? ` · ${metrics} 项指标` : ""}` : "等待识别内容";
   els.summaryEditStatus.textContent = state.summaryManuallyEdited ? "已手动修改 · 自动更新已暂停" : "模板自动生成";
 }
@@ -1805,10 +1879,14 @@ function refreshSummary({ force = false, silent = false } = {}) {
 
 function updateSmartResult(text, autoApply = true) {
   const detection = detectDocumentType(`${els.recordTitle.value}\n${text}`);
+  const batchAudit = getBatchIdentityAudit(text, state.ocrBlocks);
+  state.batchAudit = batchAudit;
   state.detectedType = detection.type;
   state.detectionReason = detection.reason;
-  els.detectedType.textContent = detection.type ? `识别为：${detection.type}` : "等待识别资料类型";
-  els.detectedReason.textContent = detection.reason;
+  els.detectedType.textContent = detection.type
+    ? (batchAudit.mixedTypes ? `批次识别：混合资料（主类型：${detection.type}）` : `识别为：${detection.type}`)
+    : "等待识别资料类型";
+  els.detectedReason.textContent = batchAudit.mixedTypes ? `已按图片页归类：${formatBatchTypeSummary(batchAudit)}` : detection.reason;
   els.applyDetectedTypeButton.disabled = !detection.type;
   if (autoApply && detection.confident) els.recordType.value = detection.type;
   renderMetricTable(text, els.recordType.value);
@@ -2709,17 +2787,18 @@ function getLocalOcrEndpoint() {
 
 async function recognizeWithLocalOcr() {
   els.processingTitle.textContent = "正在使用本机高精度 OCR…";
-  els.processingDetail.textContent = "PP-OCRv5 server 正在本机处理手机拍摄的病历图片，不上传外部服务";
+  els.processingDetail.textContent = "正在生成识别用增强副本；原图仍只保存在本机浏览器";
   els.processingPercent.textContent = "20%";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10 * 60 * 1000);
   try {
+    const preparedImages = await getOcrImages();
     const response = await fetch(getLocalOcrEndpoint(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         documentType: els.recordType?.value || "",
-        images: state.images.map((image) => ({ name: image.name, dataUrl: image.dataUrl })),
+        images: preparedImages.map((dataUrl, index) => ({ name: state.images[index]?.name || `page-${index + 1}.jpg`, dataUrl })),
       }),
       signal: controller.signal,
     });
@@ -3119,11 +3198,6 @@ async function archiveCurrent() {
     renderQualitySummary(text);
     return;
   }
-  if (batchAudit.mixedTypes) {
-    showToast(`同一批图片包含${batchAudit.types.join("、")}，请按同一份资料分批识别归档`, "error");
-    renderQualitySummary(text);
-    return;
-  }
   syncAutoStudyId();
   const appendicitisData = getAppendicitisDataFromForm();
   const inclusion = validateStudyInclusion(appendicitisData);
@@ -3133,8 +3207,8 @@ async function archiveCurrent() {
     return;
   }
   const now = new Date();
-  const metrics = labFieldRules[els.recordType.value] ? getEditableMetricRows() : [];
-  const summary = els.summaryText.value.trim() || buildSummary(text, els.recordType.value);
+  const metrics = getEditableMetricRows();
+  const summary = els.summaryText.value.trim() || buildSummaryByMode(text, els.recordType.value, state.summaryMode);
   const record = {
     id: makeId(),
     personName,
@@ -3148,6 +3222,8 @@ async function archiveCurrent() {
     ocrOriginalText: state.ocrOriginalText || text,
     summary,
     detectedType: state.detectedType,
+    batchTypes: batchAudit.types,
+    batchTypeSummary: formatBatchTypeSummary(batchAudit),
     ocrEngine: state.ocrEngine,
     studyIdOrigin: getStudyIdOrigin(appendicitisData, personName, personId),
     batchAudit,
@@ -3320,9 +3396,10 @@ function getVisibleRecords() {
   renderPersonFilter();
   const selectedPerson = els.personFilterSelect.value;
   return state.records.filter((record) => {
-    const matchesFilter = filter === "全部" || record.type === filter;
+    const recordTypes = record.batchTypes?.length ? record.batchTypes : (record.type ? [record.type] : []);
+    const matchesFilter = filter === "全部" || recordTypes.includes(filter);
     const matchesPerson = selectedPerson === "全部" || personKey(record) === selectedPerson;
-    const searchable = `${record.title} ${record.type} ${record.note} ${record.text} ${record.summary || ""} ${(record.numbers || []).join(" ")}`.toLowerCase();
+    const searchable = `${record.title} ${recordTypes.join(" ")} ${record.note} ${record.text} ${record.summary || ""} ${(record.numbers || []).join(" ")}`.toLowerCase();
     const personSearchable = `${record.personName || ""} ${record.personId || ""}`.toLowerCase();
     return matchesFilter && matchesPerson && (!query || searchable.includes(query) || personSearchable.includes(query));
   });
@@ -3360,7 +3437,7 @@ function getPatientOverviewRows(records) {
     const metrics = group.records.flatMap((record) => getResearchMetrics(record).filter(isMetricForReview));
     const issueLabels = [...new Set(metrics.map((metric) => `${metric.abbreviation || metric.name || "指标"} ${metric.value || ""}${metric.flag ? ` ${metric.flag}` : ""}`.trim()).filter(Boolean))];
     const hasPendingReview = group.records.some((record) => record.reviewStatus !== "人工已复核");
-    const typeLabels = [...new Set(group.records.map((record) => record.type).filter(Boolean))];
+    const typeLabels = [...new Set(group.records.flatMap((record) => record.batchTypes?.length ? record.batchTypes : (record.type ? [record.type] : [])).filter(Boolean))];
     const perforation = getPerforationEvidence(group.records);
     const firstDate = dates[0]?.label || "未识别";
     const lastDate = dates[dates.length - 1]?.label || firstDate;
@@ -3426,7 +3503,7 @@ function renderRecords() {
       <div class="person-group-heading"><span class="person-avatar">${escapeHtml(personLabel(group.person).slice(0, 1))}</span><div><strong>${escapeHtml(personLabel(group.person))}</strong><small>${escapeHtml(personMeta(group.person))} · ${group.records.length} 份资料</small></div></div>
       <div class="person-group-records">${group.records.map((record) => `
         <article class="record-card" data-id="${escapeHtml(record.id)}" tabindex="0" role="button" aria-label="查看 ${escapeHtml(record.title)}">
-          <div class="record-card-top"><span class="record-type">${escapeHtml(record.type)}</span><span class="record-date">${escapeHtml(formatDate(record.createdAt))}</span></div>
+          <div class="record-card-top"><span class="record-type">${escapeHtml(record.batchTypes?.length > 1 ? "混合资料批次" : record.type)}</span><span class="record-date">${escapeHtml(formatDate(record.createdAt))}</span></div>
           <h3>${escapeHtml(record.title)}</h3>
           <p class="record-excerpt">${escapeHtml(record.summary || record.text)}</p>
           <div class="record-card-bottom"><span class="record-numbers">${record.numbers?.length ? `${record.numbers.slice(0, 3).map(escapeHtml).join(" · ")}${record.numbers.length > 3 ? " …" : ""}` : "未提取到数字"}</span><span class="review-pill ${record.reviewStatus === "人工已复核" ? "reviewed" : "pending"}">${escapeHtml(record.reviewStatus || "待人工复核")}</span><span class="record-open">↗</span></div>
@@ -3453,7 +3530,8 @@ function renderSavedMetrics(metrics = []) {
     const confidenceClass = !hasConfidence || metric.confidence < 0.6 ? "low-confidence" : metric.confidence < 0.8 ? "medium-confidence" : "";
     const resultDisplay = metric.rawValue && metric.rawValue !== metric.value ? `${metric.rawValue} → ${metric.value}` : (metric.value || "");
     const reviewStatus = metric.reviewStatus || (metric.manualEdited ? "人工修改待确认" : "随资料复核");
-    return `<tr><td>${escapeHtml(metric.name || "")}</td><td>${escapeHtml(metric.abbreviation || "—")}</td><td>${escapeHtml(resultDisplay)}</td><td>${escapeHtml(metric.reference || "—")}</td><td>${escapeHtml(metric.unit || "—")}</td><td class="${metric.flag ? "flag-cell" : ""}">${escapeHtml(metric.flag || "—")}</td><td>${metric.sourcePage ? `第${escapeHtml(metric.sourcePage)}张` : "—"}</td><td>${escapeHtml(reviewStatus)}</td><td class="${confidenceClass}">${confidence}</td></tr>`;
+    const sourceLabel = metric.sourcePage ? `第${metric.sourcePage}张${metric.sourceType ? ` · ${metric.sourceType}` : ""}` : (metric.sourceType || "—");
+    return `<tr><td>${escapeHtml(metric.name || "")}</td><td>${escapeHtml(metric.abbreviation || "—")}</td><td>${escapeHtml(resultDisplay)}</td><td>${escapeHtml(metric.reference || "—")}</td><td>${escapeHtml(metric.unit || "—")}</td><td class="${metric.flag ? "flag-cell" : ""}">${escapeHtml(metric.flag || "—")}</td><td>${escapeHtml(sourceLabel)}</td><td>${escapeHtml(reviewStatus)}</td><td class="${confidenceClass}">${confidence}</td></tr>`;
   }).join("");
   return `<div class="saved-metrics"><div class="dialog-section-title">已归档结构化指标 <small>${metrics.length} 项；箭头表示人工修正</small></div><div class="metric-table-scroll"><table class="metric-table"><thead><tr><th>项目</th><th>缩写</th><th>结果（原值→当前）</th><th>参考范围</th><th>单位</th><th>提示</th><th>来源页</th><th>复核状态</th><th>置信度</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
@@ -3472,7 +3550,7 @@ function openRecord(id) {
   els.dialogTitle.textContent = record.title;
   els.dialogBody.innerHTML = `
     <div class="dialog-images">${(record.images || []).map((image, index) => `<img src="${image}" alt="归档图片 ${index + 1}" />`).join("")}</div>
-    <div class="dialog-meta"><div class="meta-item"><small>个人/患者</small><strong>${escapeHtml(personLabel(record))}</strong></div><div class="meta-item"><small>病案/就诊号</small><strong>${escapeHtml(record.personId || "未填写")}</strong></div><div class="meta-item"><small>资料类型</small><strong>${escapeHtml(record.type)}</strong></div><div class="meta-item"><small>病例ID来源</small><strong>${escapeHtml(record.studyIdOrigin || getStudyIdOrigin(record.appendicitisData, record.personName, record.personId))}</strong></div><div class="meta-item"><small>批次质控</small><strong>${escapeHtml(record.batchAudit ? (record.batchAudit.identityConflict || record.batchAudit.mixedTypes ? "需处理冲突" : "通过") : "旧记录/未生成")}</strong></div><div class="meta-item"><small>复核状态</small><strong>${escapeHtml(record.reviewStatus || "待人工复核")}</strong></div><div class="meta-item"><small>归档时间</small><strong>${escapeHtml(formatDate(record.createdAt))}</strong></div></div>
+    <div class="dialog-meta"><div class="meta-item"><small>个人/患者</small><strong>${escapeHtml(personLabel(record))}</strong></div><div class="meta-item"><small>病案/就诊号</small><strong>${escapeHtml(record.personId || "未填写")}</strong></div><div class="meta-item"><small>主资料类型</small><strong>${escapeHtml(record.type)}</strong></div><div class="meta-item"><small>批次资料类型</small><strong>${escapeHtml(record.batchTypeSummary || record.batchTypes?.join("、") || record.type || "未分类")}</strong></div><div class="meta-item"><small>病例ID来源</small><strong>${escapeHtml(record.studyIdOrigin || getStudyIdOrigin(record.appendicitisData, record.personName, record.personId))}</strong></div><div class="meta-item"><small>批次质控</small><strong>${escapeHtml(record.batchAudit ? (record.batchAudit.identityConflict ? "需处理身份冲突" : record.batchAudit.mixedTypes ? "通过（已按页归类）" : "通过") : "旧记录/未生成")}</strong></div><div class="meta-item"><small>复核状态</small><strong>${escapeHtml(record.reviewStatus || "待人工复核")}</strong></div><div class="meta-item"><small>归档时间</small><strong>${escapeHtml(formatDate(record.createdAt))}</strong></div></div>
     ${record.summary ? `<div class="dialog-text saved-summary"><div class="dialog-section-title">归档总结</div>${escapeHtml(record.summary)}</div><button class="button button-secondary copy-summary-button" type="button" data-copy-summary>复制归档总结</button>` : ""}
     ${renderSavedAppendicitisData(record.appendicitisData)}
     ${renderSavedMetrics(record.metrics)}
@@ -3587,7 +3665,7 @@ function getResearchRecordId(record, index) {
 
 function getResearchMetrics(record) {
   if (Array.isArray(record.metrics) && record.metrics.length) return record.metrics;
-  if (record.text && labFieldRules[record.type]) return extractAllLabRows(record.text, [], record.type);
+  if (record.text && (labFieldRules[record.type] || record.batchAudit?.mixedTypes)) return extractBatchLabRows(record.text, [], record.type, record.images?.length || 1, record.batchAudit);
   return [];
 }
 
@@ -3605,10 +3683,11 @@ function getResearchMetricConfidence(metric) {
 }
 
 function getResearchVariableCode(record, metric) {
-  const typeCode = ({ "血常规": "CBC", "肝肾功能": "LIVER_KIDNEY", "止凝血": "COAG", CT: "CT", 彩超: "US" })[record.type] || "OTHER";
+  const metricType = metric?.sourceType || record.type;
+  const typeCode = ({ "血常规": "CBC", "肝肾功能": "LIVER_KIDNEY", "止凝血": "COAG", CT: "CT", 彩超: "US" })[metricType] || "OTHER";
   const abbreviation = String(metric?.abbreviation || "").trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   if (abbreviation) return `${typeCode}_${abbreviation}`.slice(0, 80);
-  return `${typeCode}_V_${getStableResearchHash(`${record.type || "其他"}|${metric?.name || "未命名指标"}`)}`;
+  return `${typeCode}_V_${getStableResearchHash(`${metricType || "其他"}|${metric?.name || "未命名指标"}`)}`;
 }
 
 function mergeAppendicitisData(target, next = {}) {
@@ -3785,7 +3864,7 @@ function buildResearchWorkbookRows() {
       record.ocrEngine || "",
       record.ocrEdited ? "是" : "否",
       record.reviewStatus || "待人工复核",
-      record.batchAudit ? (record.batchAudit.identityConflict || record.batchAudit.mixedTypes ? "需处理批次冲突" : "批次质控通过") : "旧记录/未生成批次质控",
+      record.batchAudit ? (record.batchAudit.identityConflict ? "需处理身份冲突" : record.batchAudit.mixedTypes ? "批次质控通过（按页归类）" : "批次质控通过") : "旧记录/未生成批次质控",
       (record.images || []).length,
       metrics.length,
       getAppendicitisFilledCount(record.appendicitisData),
@@ -3807,7 +3886,7 @@ function buildResearchWorkbookRows() {
         reportDate,
         metric.sourcePage || "",
         metric.sourceBox || "",
-        record.type || "",
+        metric.sourceType || record.type || "",
         getStudyInclusionStatus(record.appendicitisData),
         variableCode,
         metric.name || "未命名指标",
@@ -3826,7 +3905,7 @@ function buildResearchWorkbookRows() {
       if (!variableMap.has(variableCode)) {
         variableMap.set(variableCode, [
           variableCode,
-          record.type || "",
+          metric.sourceType || record.type || "",
           metric.name || "未命名指标",
           metric.abbreviation || "",
           resultNumber === "" ? "文本" : "数值",
@@ -3844,7 +3923,7 @@ function buildResearchWorkbookRows() {
       .map(getResearchRecordDate)
       .filter((date) => date instanceof Date && !Number.isNaN(date.getTime()))
       .sort((first, second) => first.getTime() - second.getTime());
-    const types = [...new Set(patient.records.map((record) => record.type).filter(Boolean))].join("、");
+    const types = [...new Set(patient.records.flatMap((record) => record.batchTypes?.length ? record.batchTypes : (record.type ? [record.type] : [])).filter(Boolean))].join("、");
     const metricsCount = patient.records.reduce((total, record) => total + getResearchMetrics(record).length, 0);
     const firstRecord = patient.records.find((record) => record.personName) || patient.records[0] || {};
     const idRecord = patient.records.find((record) => record.personId) || patient.records[0] || {};

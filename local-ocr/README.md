@@ -8,7 +8,7 @@
 2. 日常使用：双击 `启动高精度本机版.cmd`，浏览器会自动打开本地网页。
 3. 在网页中仍然使用手机拍照、相册导入和原有归档流程；选择“本机高精度 OCR”后识别。
 
-本机服务使用 RapidOCR 的 ONNX Runtime 后端和 PP-OCRv5 server 检测/识别模型，并对手机拍屏图片生成多种增强版本后择优。官方模型列表说明 RapidOCR 支持 PP-OCRv5 中文 server 模型和 ONNX Runtime 后端。
+本机服务使用 RapidOCR 的 ONNX Runtime 后端和 PP-OCRv5 server 检测/识别模型，并对手机拍屏图片生成多种增强版本后择优。网页发送给本机服务的是自动压缩/增强后的识别副本，原图仍保留在浏览器本地用于归档。官方模型列表说明 RapidOCR 支持 PP-OCRv5 中文 server 模型和 ONNX Runtime 后端。
 
 ## 约束
 

@@ -1,5 +1,5 @@
-const CACHE_NAME = "clinical-capture-v58";
-const APP_SHELL = ["./", "./index.html", "./styles.css?v=30", "./app.js?v=ocr-local-v3", "./manifest.webmanifest", "./vendor/sheetjs/xlsx.full.min.js"];
+const CACHE_NAME = "clinical-capture-v60";
+const APP_SHELL = ["./", "./index.html", "./styles.css?v=30", "./app.js?v=ocr-mixed-batch-v5", "./manifest.webmanifest", "./vendor/sheetjs/xlsx.full.min.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));

@@ -224,8 +224,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
-            if content_length <= 0 or content_length > 160 * 1024 * 1024:
-                raise ValueError("请求图片总大小超过160MB或为空")
+            if content_length <= 0 or content_length > 260 * 1024 * 1024:
+                raise ValueError("请求图片总大小超过260MB或为空")
             body = self.rfile.read(content_length)
             payload = json.loads(body.decode("utf-8"))
             images = payload.get("images") or []
