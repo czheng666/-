@@ -1,5 +1,6 @@
 @echo off
 setlocal
+title 临床采集 - 准备高精度 OCR 环境
 cd /d "%~dp0.."
 if not exist "local-ocr\.venv\Scripts\python.exe" (
   echo 正在创建本机 OCR 环境...
