@@ -172,6 +172,7 @@
                 <span>引擎</span>
                 <select id="ocrEngineSelect" aria-label="OCR 识别引擎">
                   <option value="auto">自动（PaddleOCR；低质量时对比备用 OCR）</option>
+                  <option value="local">本机高精度 OCR（PP-OCRv5 server）</option>
                   <option value="paddle">仅 PaddleOCR PP-OCRv6 small（本地）</option>
                   <option value="tesseract">仅 Tesseract.js</option>
                 </select>
@@ -334,6 +335,6 @@
     <script src="./vendor/opencv.js"></script>
     <script src="./vendor/sheetjs/xlsx.full.min.js"></script>
     <script async src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-    <script src="./app.js?v=ocr-photo-v3"></script>
+    <script src="./app.js?v=ocr-local-v1"></script>
   </body>
 </html>

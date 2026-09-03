@@ -2682,6 +2682,42 @@ async function recognizeWithTesseract() {
   return { text: combined, blocks };
 }
 
+function getLocalOcrEndpoint() {
+  const localHost = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+  return localHost ? new URL("/api/ocr", window.location.origin).href : "http://127.0.0.1:8765/api/ocr";
+}
+
+async function recognizeWithLocalOcr() {
+  els.processingTitle.textContent = "正在使用本机高精度 OCR…";
+  els.processingDetail.textContent = "PP-OCRv5 server 正在本机处理手机拍摄的病历图片，不上传外部服务";
+  els.processingPercent.textContent = "20%";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+  try {
+    const response = await fetch(getLocalOcrEndpoint(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        documentType: els.recordType?.value || "",
+        images: state.images.map((image) => ({ name: image.name, dataUrl: image.dataUrl })),
+      }),
+      signal: controller.signal,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || `本机 OCR 服务返回 HTTP ${response.status}`);
+    els.processingPercent.textContent = "90%";
+    return { text: payload.text || "", blocks: Array.isArray(payload.blocks) ? payload.blocks : [] };
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("本机 OCR 处理超过10分钟，已停止等待");
+    if (String(error?.message || "").includes("Failed to fetch")) {
+      throw new Error("未连接到本机高精度 OCR；请先双击“启动高精度本机版.cmd”，再打开本地网页");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function addFiles(files) {
   const imageFiles = [...files].filter((file) => file.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(file.name || ""));
   if (!imageFiles.length) return;
@@ -2890,6 +2926,8 @@ async function recognizeImages() {
   els.processingTitle.textContent = "正在识别图片…";
   els.processingDetail.textContent = selectedEngine === "tesseract"
     ? "本次固定使用 Tesseract.js，不会切换到其他引擎"
+    : selectedEngine === "local"
+      ? "本次使用本机高精度 OCR；图片只发送到本机服务"
     : selectedEngine === "paddle"
       ? "本次固定使用 PaddleOCR PP-OCRv6 small，失败后会显示错误"
       : "自动模式：优先 PaddleOCR；拍屏乱码时自动对比备用 OCR";
@@ -2899,7 +2937,12 @@ async function recognizeImages() {
   els.ocrText.value = "";
   let combined = "";
   try {
-    if (selectedEngine === "tesseract") {
+    if (selectedEngine === "local") {
+      const localResult = await recognizeWithLocalOcr();
+      combined = localResult.text;
+      state.ocrBlocks = localResult.blocks;
+      state.ocrEngine = "本机高精度 OCR（PP-OCRv5 server）";
+    } else if (selectedEngine === "tesseract") {
       const tesseractResult = await recognizeWithTesseract();
       combined = tesseractResult.text;
       state.ocrBlocks = tesseractResult.blocks;
@@ -4113,6 +4156,10 @@ restoreCaptureDraft();
 ensurePatientMatchHint();
 updatePatientMatchHint();
 refreshCameraDevices();
+
+if (["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
+  if (els.ocrEngineSelect) els.ocrEngineSelect.value = "local";
+}
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("./sw.js").then((registration) => registration.update()).catch(() => {});
 loadRecords();
